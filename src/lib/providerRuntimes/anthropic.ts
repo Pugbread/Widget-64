@@ -120,6 +120,7 @@ async function prepareTurn(input: ProviderTurnInput<"anthropic">): Promise<Provi
     delegation.delegationSecret,
     delegation.groupId,
     delegation.agentLabel,
+    input.cwd,
   );
   const providerOptions: ProviderTurnOptionsByProvider = {
     ...input.providerOptions,

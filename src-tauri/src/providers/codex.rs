@@ -41,7 +41,9 @@ use crate::providers::traits::{
     ProviderHistoryResponse, ProviderKind, ProviderPreparedCommand, ProviderSendPromptRequest,
     ProviderSessionModelSwitchMode,
 };
-use crate::providers::util::{cap_event_size, expanded_tool_path, shim_command};
+use crate::providers::util::{
+    cap_event_size, expanded_tool_path, shim_command, terminate_child_process,
+};
 use crate::providers::{
     emit_provider_event, emit_provider_runtime_event, ProviderRuntimeEvent,
     ProviderRuntimeEventType,
@@ -1720,8 +1722,7 @@ fn run_app_server_request(cwd: &str, method: &str, params: JsonValue) -> Result<
             .read_line(&mut line)
             .map_err(|e| format!("codex app-server read: {}", e))?;
         if read == 0 {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_child_process(&mut child);
             return Err("Codex app-server exited before responding".to_string());
         }
         let trimmed = line.trim();
@@ -1733,8 +1734,7 @@ fn run_app_server_request(cwd: &str, method: &str, params: JsonValue) -> Result<
         if parsed.get("id").and_then(|v| v.as_i64()) != Some(2) {
             continue;
         }
-        let _ = child.kill();
-        let _ = child.wait();
+        terminate_child_process(&mut child);
         if let Some(msg) = get_json_str(&parsed, &["error", "message"]) {
             return Err(msg.to_string());
         }
@@ -1751,8 +1751,7 @@ fn spawn_and_stream(
     {
         let mut inst = instances.lock().map_err(|e| e.to_string())?;
         if let Some(mut old) = inst.remove(&session_id) {
-            let _ = old.child.kill();
-            let _ = old.child.wait();
+            terminate_child_process(&mut old.child);
             drop(inst);
             std::thread::sleep(std::time::Duration::from_millis(150));
         }
@@ -2040,8 +2039,7 @@ fn spawn_app_server_turn(
     {
         let mut inst = instances.lock().map_err(|e| e.to_string())?;
         if inst.contains_key(&session_id) {
-            let _ = child.kill();
-            let _ = child.wait();
+            terminate_child_process(&mut child);
             return Err(format!(
                 "Codex session {} already has an active turn. Wait for it to finish or cancel it before sending another prompt.",
                 session_id
@@ -2377,8 +2375,7 @@ fn finish_app_server_turn(
             }
         }
         if let Some(mut instance) = inst.remove(session_id) {
-            let _ = instance.child.kill();
-            let _ = instance.child.wait();
+            terminate_child_process(&mut instance.child);
         }
     }
     if !suppress_done {
@@ -2556,7 +2553,31 @@ impl CodexAdapter {
             resume_id_owned,
             req.cwd
         );
-        if codex_transport_is_exec() {
+        let use_exec_transport = codex_transport_is_exec();
+        if !use_exec_transport && find_codex_rollout(&resume_id_owned).is_none() {
+            safe_eprintln!(
+                "[codex] Stored thread_id={} for session_id={} has no rollout; starting a fresh app-server thread",
+                resume_id_owned,
+                req.session_id
+            );
+            return spawn_app_server_turn(
+                &self.instances,
+                app_handle,
+                req.session_id,
+                InvokeMode::Fresh,
+                &req.cwd,
+                &req.prompt,
+                &req.sandbox_mode,
+                &req.approval_policy,
+                &req.model,
+                &req.effort,
+                &req.collaboration_mode,
+                req.full_auto.unwrap_or(false),
+                req.yolo.unwrap_or(false),
+                &req.mcp_env,
+            );
+        }
+        if use_exec_transport {
             let cmd = build_command(
                 InvokeMode::Resume(&resume_id_owned),
                 &req.cwd,
@@ -2594,8 +2615,7 @@ impl CodexAdapter {
     pub fn cancel(&self, session_id: &str) -> Result<(), String> {
         let mut instances = self.instances.lock().map_err(|e| e.to_string())?;
         if let Some(instance) = instances.get_mut(session_id) {
-            let _ = instance.child.kill();
-            let _ = instance.child.wait();
+            terminate_child_process(&mut instance.child);
             safe_eprintln!("[codex] Cancelled session {}", session_id);
         }
         Ok(())
@@ -2608,8 +2628,7 @@ impl CodexAdapter {
             .map_err(|e| e.to_string())?
             .remove(session_id);
         if let Some(mut instance) = instance {
-            let _ = instance.child.kill();
-            let _ = instance.child.wait();
+            terminate_child_process(&mut instance.child);
             safe_eprintln!("[codex] Closed session {}", session_id);
         }
         Ok(())
@@ -2852,6 +2871,14 @@ impl ProviderAdapter for CodexAdapter {
                 "messages": [],
                 "stat": null,
                 "reason": "thread_id_required",
+            }));
+        }
+        if find_codex_rollout(&req.thread_id).is_none() {
+            return Ok(json!({
+                "status": "skipped",
+                "messages": [],
+                "stat": null,
+                "reason": "codex_rollout_missing",
             }));
         }
         let messages = load_codex_history_by_thread(&req.thread_id);
@@ -3911,5 +3938,20 @@ mod tests {
         assert_eq!(error["phase"], "error");
         assert_eq!(error["message"], "Codex failed");
         assert_eq!(error["terminal"], true);
+    }
+
+    #[test]
+    fn hydrate_missing_codex_rollout_reports_skipped_reason() {
+        let adapter = CodexAdapter::new();
+        let result = match adapter.history_hydrate(json!({
+            "thread_id": "missing-thread-for-hydrate-test-00000000",
+        })) {
+            Ok(value) => value,
+            Err(err) => panic!("history hydrate should not error for a missing rollout: {err}"),
+        };
+
+        assert_eq!(result["status"], "skipped");
+        assert_eq!(result["reason"], "codex_rollout_missing");
+        assert_eq!(result["messages"].as_array().map(Vec::len), Some(0));
     }
 }

@@ -737,11 +737,25 @@ export function useWidgetBridgeHost({
       }
 
       case "t64:create-session": {
-        const { cwd: sessCwd, name: sessName, prompt: sessPrompt, id: csId, provider: rawProvider } = msg.payload || {};
+        const {
+          cwd: sessCwd,
+          name: sessName,
+          prompt: sessPrompt,
+          id: csId,
+          provider: rawProvider,
+          x: sessX,
+          y: sessY,
+          width: sessW,
+          height: sessH,
+        } = msg.payload || {};
         const hasPrompt = typeof sessPrompt === "string" && sessPrompt.length > 0;
         const { provider, providerLocked } = resolveCreateSessionProvider(rawProvider, hasPrompt);
+        const x = typeof sessX === "number" && Number.isFinite(sessX) ? sessX : undefined;
+        const y = typeof sessY === "number" && Number.isFinite(sessY) ? sessY : undefined;
+        const width = typeof sessW === "number" && Number.isFinite(sessW) ? sessW : undefined;
+        const height = typeof sessH === "number" && Number.isFinite(sessH) ? sessH : undefined;
         const panel = useCanvasStore.getState().addClaudeTerminalAt(
-          sessCwd || ".", false, sessName || "Widget Session"
+          sessCwd || ".", false, sessName || "Widget Session", undefined, x, y, width, height
         );
         const sid = panel.terminalId;
         useProviderSessionStore.getState().createSession(

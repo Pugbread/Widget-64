@@ -9,13 +9,15 @@
 //! - [`cap_event_size`] — truncates oversized tool-result event lines
 //!   before they leave the backend. Saves the renderer when a bash tool
 //!   dumps hundreds of MB.
+//! - [`terminate_child_process`] — terminates provider CLI process trees, which
+//!   matters on Windows because `.cmd` shims run under `cmd /C`.
 //! - [`sanitize_dangling_tool_uses`] — patches Claude-CLI JSONL files to
 //!   close dangling `tool_use` blocks on resume. **Claude-specific today**,
 //!   but lives here because `cap_event_size`'s helpers (`truncate_text_field`,
 //!   the char-boundary helpers) are shared.
 
 use std::collections::HashMap;
-use std::process::Command;
+use std::process::{Child, Command};
 
 /// PATH used for app-spawned shells and provider CLIs. macOS GUI launches and
 /// embedded tool runners often do not inherit the user's login-shell PATH, so
@@ -61,6 +63,38 @@ pub fn shim_command(bin: &str) -> Command {
     {
         Command::new(bin)
     }
+}
+
+// --- process termination --------------------------------------------------
+
+/// Terminate a provider CLI and any children it spawned.
+///
+/// On Windows provider commands are often launched through `cmd /C` so npm
+/// `.cmd` shims work. Killing only the direct `cmd.exe` child can leave the
+/// real `node.exe`/provider CLI process running, which makes a cancelled prompt
+/// keep thinking in the background. `taskkill /T` targets the whole process
+/// tree for the direct child PID.
+pub fn terminate_child_process(child: &mut Child) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        use std::process::Stdio;
+
+        let pid = child.id().to_string();
+        let status = Command::new("taskkill")
+            .args(["/PID", pid.as_str(), "/T", "/F"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000)
+            .status();
+        if let Err(e) = status {
+            crate::safe_eprintln!("[provider] taskkill /T failed for pid {}: {}", pid, e);
+        }
+    }
+
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 // --- cap_event_size + helpers --------------------------------------------

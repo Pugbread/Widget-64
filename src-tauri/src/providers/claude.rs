@@ -32,7 +32,7 @@ use crate::providers::traits::{
 };
 use crate::providers::util::{
     cap_event_size, expanded_tool_path, find_existing_claude_session_jsonl,
-    sanitize_dangling_tool_uses, shim_command,
+    sanitize_dangling_tool_uses, shim_command, terminate_child_process,
 };
 use crate::providers::{
     emit_provider_event, emit_provider_runtime_event, ProviderRuntimeEvent,
@@ -1025,6 +1025,17 @@ fn prepare_claude_command(
         if let Err(e) = crate::ensure_t64_mcp_impl(lifecycle.app_handle, cwd) {
             safe_eprintln!("[claude:mcp] setup failed before {}: {}", command_label, e);
         }
+        if let Some(path) = approver_path.as_ref() {
+            if let Err(e) =
+                crate::merge_existing_claude_mcp_servers_into_file(cwd, std::path::Path::new(path))
+            {
+                safe_eprintln!(
+                    "[claude:mcp] failed to merge existing MCP servers into approver config before {}: {}",
+                    command_label,
+                    e
+                );
+            }
+        }
         maybe_apply_openwolf(&settings_path, cwd, lifecycle.openwolf);
     }
 
@@ -1057,8 +1068,7 @@ fn spawn_and_stream(
     {
         let mut inst = instances.lock().map_err(|e| e.to_string())?;
         if let Some(mut old) = inst.remove(&session_id) {
-            let _ = old.child.kill();
-            let _ = old.child.wait();
+            terminate_child_process(&mut old.child);
             // Brief delay for OS to release file locks on session JSONL
             drop(inst); // release mutex before sleeping
             std::thread::sleep(std::time::Duration::from_millis(300));
@@ -1430,8 +1440,7 @@ impl ClaudeAdapter {
     pub fn cancel(&self, session_id: &str) -> Result<(), String> {
         let mut instances = self.instances.lock().map_err(|e| e.to_string())?;
         if let Some(instance) = instances.get_mut(session_id) {
-            let _ = instance.child.kill();
-            let _ = instance.child.wait();
+            terminate_child_process(&mut instance.child);
             safe_eprintln!("[claude] Cancelled session {}", session_id);
         }
         Ok(())
@@ -1444,8 +1453,7 @@ impl ClaudeAdapter {
             .map_err(|e| e.to_string())?
             .remove(session_id);
         if let Some(mut instance) = instance {
-            let _ = instance.child.kill();
-            let _ = instance.child.wait();
+            terminate_child_process(&mut instance.child);
             safe_eprintln!("[claude] Closed session {}", session_id);
         }
         Ok(())

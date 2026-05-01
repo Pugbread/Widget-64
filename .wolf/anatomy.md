@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-04-30T04:00:00.896Z
-> Files: 521 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-01T16:00:01.045Z
+> Files: 522 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ./
 
@@ -18,6 +18,7 @@
 - `SECURITY.md` — Security Policy (~445 tok)
 - `terminal64-delegation-2026-04-30T02-59-53-683Z-ac9b6cf8.md` — Terminal 64 Delegation Team Chat (~5087 tok)
 - `terminal64-delegation-2026-04-30T03-36-58-239Z-94e817c3.md` — Terminal 64 Delegation Team Chat (~5725 tok)
+- `terminal64-delegation-2026-04-30T03-56-06-151Z-9f72d378.md` — Terminal 64 Delegation Team Chat (~4472 tok)
 - `tsconfig.json` — TypeScript configuration (~216 tok)
 - `tsconfig.node.json` (~67 tok)
 - `vite.config.ts` — Vite build configuration (~140 tok)
@@ -757,7 +758,3 @@
 - `__init__.py` (~34 tok)
 - `_build_config.py` — _build_config.py.in is converted into _build_config.py during the meson build process. (~569 tok)
 - `bokeh_renderer.py` — BokehRenderer: filled, grid, lines, mask + 5 more (~3954 tok)
-
-## src/lib/
-
-- `anthropicProviderEvents.verification.ts` — TypeScript fixtures proving Anthropic ProviderRuntimeEvent ingestion hydrates existing provider UI state. (~2600 tok)

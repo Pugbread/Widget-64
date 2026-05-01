@@ -374,9 +374,13 @@ export const openaiRuntime: ProviderRuntime<"openai"> = {
         req: { thread_id: threadId },
       });
       if (result.status === "skipped" || result.status === "unsupported") {
+        if (result.reason === "codex_rollout_missing") {
+          setOpenAiThreadIdForSession(input.sessionId, null);
+        }
         return {
           status: result.status,
           ...(result.reason ? { reason: result.reason } : {}),
+          ...(result.reason === "codex_rollout_missing" ? { clearCache: true } : {}),
         };
       }
       const history = result.messages;

@@ -3201,15 +3201,15 @@
       "error_message": "`cargo test providers::snapshots providers::registry -- --nocapture` failed with `unexpected argument 'providers::registry'`.",
       "file": "N/A",
       "root_cause": "Cargo accepts only one test name filter before the `--` test harness arguments; passing two module filters is a command invocation error.",
-      "fix": "Reran the focused provider tests with a single `providers::` filter, which covered the snapshot and registry tests successfully.",
+      "fix": "Reran focused tests with a single module filter, which covered the intended tests successfully.",
       "tags": [
         "cargo",
         "tests",
         "command-invocation"
       ],
       "related_bugs": [],
-      "occurrences": 1,
-      "last_seen": "2026-04-30T03:21:24Z"
+      "occurrences": 2,
+      "last_seen": "2026-05-01T20:42:13Z"
     },
     {
       "id": "bug-168",
@@ -3466,6 +3466,65 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-04-30T04:06:06Z"
+    },
+    {
+      "id": "bug-182",
+      "timestamp": "2026-04-30T23:01:53Z",
+      "error_message": "User reopened a rosync widget Codex session with empty chat history and sending failed with `Codex app-server thread/resume failed code=-32600: no rollout found for thread id 898626b3-d01d-45c0-a854-799485428a23`.",
+      "file": "src-tauri/src/providers/codex.rs",
+      "root_cause": "Persisted OpenAI runtime metadata could keep a Codex thread id after the corresponding rollout JSONL disappeared. T64 treated any resume id as resumable, so app-server `thread/resume` failed instead of starting a fresh thread.",
+      "fix": "Codex app-server sends now preflight the stored thread id against local rollout files and start a fresh app-server thread when the rollout is missing. Codex history hydrate also reports `codex_rollout_missing`, and the OpenAI runtime clears the stale resume id when that reason is returned.",
+      "tags": [
+        "codex",
+        "app-server",
+        "resume",
+        "history",
+        "widget"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-04-30T23:01:53Z"
+    },
+    {
+      "id": "bug-183",
+      "timestamp": "2026-05-01T19:44:29Z",
+      "error_message": "Provider thinking/prompts may not cancel on Windows because provider CLIs run through `cmd /C` shims and direct `Child::kill()` only targets the wrapper process.",
+      "file": "src-tauri/src/providers/util.rs, src-tauri/src/providers/claude.rs, src-tauri/src/providers/codex.rs, src-tauri/src/providers/cursor.rs",
+      "root_cause": "The provider adapters used direct `child.kill()`/`child.wait()` on the process returned by Rust. On Windows that process can be `cmd.exe` from the npm shim wrapper, leaving the actual provider CLI child process alive.",
+      "fix": "Added provider utility `terminate_child_process`, which uses `taskkill /PID <pid> /T /F` with `CREATE_NO_WINDOW` on Windows before falling back to `Child::kill()` and `wait()`, then routed Claude, Codex, and Cursor cancel/close/replacement cleanup through it.",
+      "tags": [
+        "windows",
+        "provider",
+        "cancel",
+        "process-tree",
+        "claude",
+        "codex",
+        "cursor"
+      ],
+      "related_bugs": [
+        "bug-rust-win-003"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-01T19:44:29Z"
+    },
+    {
+      "id": "bug-184",
+      "timestamp": "2026-05-01T20:42:13Z",
+      "error_message": "The T64 MCP inserter adds Terminal 64 MCP but wipes/hides other installed MCPs such as Roblox Studio in provider MCP JSON configs.",
+      "file": "src-tauri/src/lib.rs, src-tauri/src/providers/claude.rs, src/lib/tauriApi.ts, src/lib/providerRuntimes/anthropic.ts",
+      "root_cause": "Generated Claude MCP configs were Terminal-64-only, so passing them to Claude could hide existing user/project MCP servers for that run. Frontend delegation helpers also replaced the entire `terminal-64` env object instead of only updating Terminal 64 delegation keys, and malformed existing MCP JSON could be treated as an empty config.",
+      "fix": "Added shared MCP JSON merge helpers, made generated Claude delegation/approver configs merge existing user and project MCP servers before replacing only Terminal 64 entries, kept Cursor/Claude project insertion on the same preserve-siblings helper, made frontend delegation env updates preserve unrelated env fields, and made malformed existing MCP JSON fail closed instead of being overwritten.",
+      "tags": [
+        "mcp",
+        "claude",
+        "cursor",
+        "codex",
+        "delegation",
+        "config-preservation"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-01T20:42:13Z"
     }
   ]
 }

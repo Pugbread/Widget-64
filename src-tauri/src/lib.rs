@@ -3415,25 +3415,31 @@ fn create_mcp_config_file(
     delegation_secret: String,
     group_id: String,
     agent_label: String,
+    cwd: Option<String>,
 ) -> Result<String, String> {
     let app_dir = get_app_dir(app_handle)?;
     let script_path = t64_mcp_script_path(&app_dir);
     let node_path = resolve_node_path();
     safe_eprintln!("[mcp] Using node: {}", node_path);
-    let config = serde_json::json!({
-        "mcpServers": {
-            "terminal-64": {
-                "command": node_path,
-                "args": [script_path],
-                "env": {
-                    "T64_DELEGATION_PORT": delegation_port.to_string(),
-                    "T64_DELEGATION_SECRET": delegation_secret,
-                    "T64_GROUP_ID": group_id,
-                    "T64_AGENT_LABEL": agent_label,
-                }
+    let mut config = serde_json::json!({});
+    if let Some(cwd) = cwd.as_deref().filter(|value| !value.trim().is_empty()) {
+        merge_existing_claude_mcp_servers(cwd, &mut config)?;
+    }
+    insert_json_mcp_server(
+        &mut config,
+        "terminal-64",
+        serde_json::json!({
+            "command": node_path,
+            "args": [script_path],
+            "env": {
+                "T64_DELEGATION_PORT": delegation_port.to_string(),
+                "T64_DELEGATION_SECRET": delegation_secret,
+                "T64_GROUP_ID": group_id,
+                "T64_AGENT_LABEL": agent_label,
             }
-        }
-    });
+        }),
+        "generated MCP config",
+    )?;
     let dir = std::env::temp_dir().join("t64-mcp");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let filename = format!("{}.json", uuid::Uuid::new_v4());
@@ -3452,25 +3458,130 @@ fn get_node_path() -> String {
     resolve_node_path().to_string()
 }
 
+fn json_mcp_servers_mut<'a>(
+    config: &'a mut serde_json::Value,
+    label: &str,
+) -> Result<&'a mut serde_json::Map<String, serde_json::Value>, String> {
+    let root = config
+        .as_object_mut()
+        .ok_or_else(|| format!("Invalid {}: root must be an object", label))?;
+    let servers = root
+        .entry("mcpServers")
+        .or_insert_with(|| serde_json::json!({}));
+    servers
+        .as_object_mut()
+        .ok_or_else(|| format!("Invalid {}: mcpServers must be an object", label))
+}
+
+fn insert_json_mcp_server(
+    config: &mut serde_json::Value,
+    name: &str,
+    server: serde_json::Value,
+    label: &str,
+) -> Result<(), String> {
+    json_mcp_servers_mut(config, label)?.insert(name.to_string(), server);
+    Ok(())
+}
+
+fn merge_mcp_servers_from_value(
+    target: &mut serde_json::Value,
+    source: &serde_json::Value,
+    overwrite: bool,
+    label: &str,
+) -> Result<(), String> {
+    let Some(source_servers) = source.get("mcpServers").and_then(|v| v.as_object()) else {
+        return Ok(());
+    };
+    let target_servers = json_mcp_servers_mut(target, label)?;
+    for (name, server) in source_servers {
+        if overwrite || !target_servers.contains_key(name) {
+            target_servers.insert(name.clone(), server.clone());
+        }
+    }
+    Ok(())
+}
+
+fn merge_mcp_servers_from_json_file(
+    target: &mut serde_json::Value,
+    path: &std::path::Path,
+    overwrite: bool,
+    label: &str,
+) -> Result<(), String> {
+    let data = match std::fs::read_to_string(path) {
+        Ok(data) => data,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(format!("read {}: {}", path.display(), e)),
+    };
+    let source = serde_json::from_str::<serde_json::Value>(&data)
+        .map_err(|e| format!("parse {}: {}", path.display(), e))?;
+    merge_mcp_servers_from_value(target, &source, overwrite, label)
+}
+
+fn read_json_config_or_empty(
+    path: &std::path::Path,
+    label: &str,
+) -> Result<serde_json::Value, String> {
+    match std::fs::read_to_string(path) {
+        Ok(data) => serde_json::from_str::<serde_json::Value>(&data)
+            .map_err(|e| format!("parse {} {}: {}", label, path.display(), e)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(serde_json::json!({})),
+        Err(e) => Err(format!("read {} {}: {}", label, path.display(), e)),
+    }
+}
+
+fn merge_existing_claude_mcp_servers(
+    cwd: &str,
+    target: &mut serde_json::Value,
+) -> Result<(), String> {
+    if let Some(home) = dirs::home_dir() {
+        let claude_dir = home.join(".claude");
+        for name in ["settings.json", "settings.local.json"] {
+            merge_mcp_servers_from_json_file(
+                target,
+                &claude_dir.join(name),
+                true,
+                "generated MCP config",
+            )?;
+        }
+    }
+    merge_mcp_servers_from_json_file(
+        target,
+        &std::path::Path::new(cwd).join(".mcp.json"),
+        true,
+        "generated MCP config",
+    )
+}
+
+pub(crate) fn merge_existing_claude_mcp_servers_into_file(
+    cwd: &str,
+    path: &std::path::Path,
+) -> Result<(), String> {
+    let generated = std::fs::read_to_string(path)
+        .map_err(|e| format!("read generated MCP config {}: {}", path.display(), e))
+        .and_then(|data| {
+            serde_json::from_str::<serde_json::Value>(&data)
+                .map_err(|e| format!("parse generated MCP config {}: {}", path.display(), e))
+        })?;
+    let mut merged = serde_json::json!({});
+    merge_existing_claude_mcp_servers(cwd, &mut merged)?;
+    merge_mcp_servers_from_value(&mut merged, &generated, true, "generated MCP config")?;
+    std::fs::write(
+        path,
+        serde_json::to_string_pretty(&merged).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| format!("write generated MCP config {}: {}", path.display(), e))
+}
+
 pub(crate) fn ensure_t64_mcp_impl(app_handle: &tauri::AppHandle, cwd: &str) -> Result<(), String> {
     let app_dir = get_app_dir(app_handle.clone())?;
     let script_path = t64_mcp_script_path(&app_dir);
     let node_path = resolve_node_path();
     let mcp_path = std::path::Path::new(cwd).join(".mcp.json");
 
-    let mut config: serde_json::Value = std::fs::read_to_string(&mcp_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-
-    let servers = config
-        .as_object_mut()
-        .ok_or("Invalid .mcp.json")?
-        .entry("mcpServers")
-        .or_insert_with(|| serde_json::json!({}));
+    let mut config = read_json_config_or_empty(&mcp_path, ".mcp.json")?;
 
     // Only write if missing or command/args changed
-    if let Some(existing) = servers.get("terminal-64") {
+    if let Some(existing) = config.get("mcpServers").and_then(|v| v.get("terminal-64")) {
         if existing.get("command").and_then(|v| v.as_str()) == Some(node_path)
             && existing
                 .get("args")
@@ -3482,10 +3593,12 @@ pub(crate) fn ensure_t64_mcp_impl(app_handle: &tauri::AppHandle, cwd: &str) -> R
         }
     }
 
-    servers.as_object_mut().ok_or("Invalid mcpServers")?.insert(
-        "terminal-64".to_string(),
+    insert_json_mcp_server(
+        &mut config,
+        "terminal-64",
         serde_json::json!({ "command": node_path, "args": [script_path] }),
-    );
+        ".mcp.json",
+    )?;
 
     std::fs::write(
         &mcp_path,
@@ -3579,27 +3692,20 @@ pub(crate) fn ensure_cursor_mcp_impl_with_env(
     })?;
     let mcp_path = cursor_dir.join("mcp.json");
 
-    let mut config: serde_json::Value = std::fs::read_to_string(&mcp_path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_else(|| serde_json::json!({}));
-
-    let servers = config
-        .as_object_mut()
-        .ok_or("Invalid .cursor/mcp.json")?
-        .entry("mcpServers")
-        .or_insert_with(|| serde_json::json!({}));
+    let mut config = read_json_config_or_empty(&mcp_path, ".cursor/mcp.json")?;
 
     let desired_server = cursor_mcp_server_config(node_path, &script_path, mcp_env);
 
-    if servers.get("terminal-64") == Some(&desired_server) {
+    if config.get("mcpServers").and_then(|v| v.get("terminal-64")) == Some(&desired_server) {
         return Ok(());
     }
 
-    servers
-        .as_object_mut()
-        .ok_or("Invalid mcpServers")?
-        .insert("terminal-64".to_string(), desired_server);
+    insert_json_mcp_server(
+        &mut config,
+        "terminal-64",
+        desired_server,
+        ".cursor/mcp.json",
+    )?;
 
     std::fs::write(
         &mcp_path,
@@ -6167,6 +6273,10 @@ mod stability_tests {
         ))
     }
 
+    fn temp_dir_path(name: &str) -> std::path::PathBuf {
+        temp_file_path(name)
+    }
+
     #[test]
     fn rewrite_size_limit_rejects_pathological_jsonl_before_full_read() {
         let path = temp_file_path("oversized-jsonl");
@@ -6344,5 +6454,136 @@ mod stability_tests {
         assert!(env.get("T64_DELEGATION_SECRET").is_none());
         assert!(env.get("T64_GROUP_ID").is_none());
         assert!(env.get("T64_AGENT_LABEL").is_none());
+    }
+
+    #[test]
+    fn json_mcp_insert_preserves_unrelated_servers() {
+        let mut config = serde_json::json!({
+            "mcpServers": {
+                "roblox-studio": {
+                    "command": "roblox-mcp",
+                    "args": ["serve"]
+                }
+            },
+            "otherSetting": true
+        });
+
+        insert_json_mcp_server(
+            &mut config,
+            "terminal-64",
+            serde_json::json!({ "command": "node", "args": ["t64-server.mjs"] }),
+            "test MCP config",
+        )
+        .unwrap();
+
+        assert_eq!(
+            config["mcpServers"]["roblox-studio"]["command"].as_str(),
+            Some("roblox-mcp")
+        );
+        assert_eq!(
+            config["mcpServers"]["terminal-64"]["command"].as_str(),
+            Some("node")
+        );
+        assert_eq!(config["otherSetting"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn json_mcp_reader_rejects_invalid_existing_config() {
+        let path = temp_file_path("invalid-mcp-json");
+        std::fs::write(&path, "{ not valid json").unwrap();
+
+        let err = read_json_config_or_empty(&path, ".mcp.json").unwrap_err();
+        let still_there = std::fs::read_to_string(&path).unwrap();
+        let _ = std::fs::remove_file(&path);
+
+        assert!(err.contains("parse .mcp.json"));
+        assert_eq!(still_there, "{ not valid json");
+    }
+
+    #[test]
+    fn generated_claude_mcp_config_keeps_project_servers() {
+        let cwd = temp_dir_path("mcp-project");
+        std::fs::create_dir_all(&cwd).unwrap();
+        std::fs::write(
+            cwd.join(".mcp.json"),
+            serde_json::json!({
+                "mcpServers": {
+                    "roblox-studio": {
+                        "command": "roblox-mcp",
+                        "args": ["serve"]
+                    },
+                    "terminal-64": {
+                        "command": "old-node",
+                        "args": ["old-t64-server.mjs"]
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let generated = cwd.join("generated-mcp.json");
+        std::fs::write(
+            &generated,
+            serde_json::json!({
+                "mcpServers": {
+                    "t64": {
+                        "command": "terminal-64",
+                        "args": [],
+                        "env": { "T64_PERMISSION_SHIM": "1" }
+                    }
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        merge_existing_claude_mcp_servers_into_file(cwd.to_str().unwrap(), &generated).unwrap();
+        let merged: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&generated).unwrap()).unwrap();
+        let _ = std::fs::remove_dir_all(&cwd);
+
+        assert_eq!(
+            merged["mcpServers"]["roblox-studio"]["command"].as_str(),
+            Some("roblox-mcp")
+        );
+        assert_eq!(
+            merged["mcpServers"]["terminal-64"]["command"].as_str(),
+            Some("old-node")
+        );
+        assert_eq!(
+            merged["mcpServers"]["t64"]["env"]["T64_PERMISSION_SHIM"].as_str(),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn codex_mcp_insert_preserves_unrelated_servers() {
+        let dir = temp_dir_path("codex-mcp");
+        let config = dir.join("config.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(
+            &config,
+            r#"
+[mcp_servers.roblox-studio]
+command = "roblox-mcp"
+args = ["serve"]
+enabled = true
+"#,
+        )
+        .unwrap();
+
+        configure_codex_t64_mcp(&config, "node", "t64-server.mjs").unwrap();
+        let parsed = read_toml_document(&config).unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+
+        assert_eq!(
+            parsed["mcp_servers"]["roblox-studio"]["command"].as_str(),
+            Some("roblox-mcp")
+        );
+        assert_eq!(
+            parsed["mcp_servers"]["terminal-64"]["command"].as_str(),
+            Some("node")
+        );
     }
 }

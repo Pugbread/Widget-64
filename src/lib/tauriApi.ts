@@ -563,12 +563,14 @@ export async function createMcpConfigFile(
   delegationSecret: string,
   groupId: string,
   agentLabel: string,
+  cwd?: string,
 ): Promise<string> {
   return invoke("create_mcp_config_file", {
     delegationPort,
     delegationSecret,
     groupId,
     agentLabel,
+    cwd,
   });
 }
 
@@ -609,17 +611,25 @@ export async function setT64DelegationEnv(
 
   const config: Record<string, any> = {};
   try {
-    Object.assign(config, JSON.parse(await readFile(mcpPath)));
+    const existing = await readFile(mcpPath);
+    Object.assign(config, JSON.parse(existing));
     console.log("[delegation] Existing .mcp.json loaded");
-  } catch {
+  } catch (err) {
+    if (String(err).includes("parse") || err instanceof SyntaxError) {
+      throw new Error(`Refusing to update invalid .mcp.json at ${mcpPath}: ${err}`);
+    }
     console.log("[delegation] No existing .mcp.json — creating fresh");
   }
   if (!config.mcpServers) config.mcpServers = {};
 
+  const previousEntry = config.mcpServers["terminal-64"] ?? {};
+  const previousEnv = typeof previousEntry.env === "object" && previousEntry.env !== null ? previousEntry.env : {};
   config.mcpServers["terminal-64"] = {
+    ...previousEntry,
     command: nodePath,
     args: [scriptPath],
     env: {
+      ...previousEnv,
       T64_DELEGATION_PORT: String(delegationPort),
       T64_DELEGATION_SECRET: delegationSecret,
       T64_GROUP_ID: groupId,
@@ -655,13 +665,32 @@ export async function clearT64DelegationEnv(cwd: string): Promise<void> {
 
   const config: Record<string, any> = {};
   try {
-    Object.assign(config, JSON.parse(await readFile(mcpPath)));
-  } catch { return; }
+    const existing = await readFile(mcpPath);
+    Object.assign(config, JSON.parse(existing));
+  } catch (err) {
+    if (String(err).includes("parse") || err instanceof SyntaxError) {
+      throw new Error(`Refusing to update invalid .mcp.json at ${mcpPath}: ${err}`);
+    }
+    return;
+  }
 
   const entry = config.mcpServers?.["terminal-64"];
   if (!entry?.env) return;
 
-  config.mcpServers["terminal-64"] = { command: nodePath, args: [scriptPath] };
+  const nextEnv = { ...entry.env };
+  delete nextEnv.T64_DELEGATION_PORT;
+  delete nextEnv.T64_DELEGATION_SECRET;
+  delete nextEnv.T64_GROUP_ID;
+  delete nextEnv.T64_AGENT_LABEL;
+
+  const nextEntry = { ...entry, command: nodePath, args: [scriptPath] };
+  if (Object.keys(nextEnv).length > 0) {
+    nextEntry.env = nextEnv;
+  } else {
+    delete nextEntry.env;
+  }
+
+  config.mcpServers["terminal-64"] = nextEntry;
   await writeFile(mcpPath, JSON.stringify(config, null, 2));
 }
 

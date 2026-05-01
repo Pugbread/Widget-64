@@ -22,7 +22,9 @@ use crate::providers::traits::{
     ProviderCreateSessionRequest, ProviderHistoryCapabilities, ProviderKind,
     ProviderPreparedCommand, ProviderSendPromptRequest, ProviderSessionModelSwitchMode,
 };
-use crate::providers::util::{cap_event_size, expanded_tool_path, shim_command};
+use crate::providers::util::{
+    cap_event_size, expanded_tool_path, shim_command, terminate_child_process,
+};
 use crate::providers::{
     emit_provider_event, emit_provider_runtime_event, ProviderRuntimeEvent,
     ProviderRuntimeEventType,
@@ -761,8 +763,7 @@ fn spawn_and_stream(
     {
         let mut instances = instances.lock().map_err(|e| e.to_string())?;
         if let Some(mut old) = instances.remove(&session_id) {
-            let _ = old.child.kill();
-            let _ = old.child.wait();
+            terminate_child_process(&mut old.child);
         }
     }
 
@@ -984,8 +985,7 @@ impl CursorAdapter {
     fn cancel(&self, session_id: &str) -> Result<(), String> {
         let mut instances = self.instances.lock().map_err(|e| e.to_string())?;
         if let Some(instance) = instances.get_mut(session_id) {
-            let _ = instance.child.kill();
-            let _ = instance.child.wait();
+            terminate_child_process(&mut instance.child);
             safe_eprintln!("[cursor] Cancelled session {}", session_id);
         }
         Ok(())
@@ -998,8 +998,7 @@ impl CursorAdapter {
             .map_err(|e| e.to_string())?
             .remove(session_id);
         if let Some(mut instance) = instance {
-            let _ = instance.child.kill();
-            let _ = instance.child.wait();
+            terminate_child_process(&mut instance.child);
             safe_eprintln!("[cursor] Closed session {}", session_id);
         }
         if let Ok(mut sessions) = self.cursor_sessions.lock() {
