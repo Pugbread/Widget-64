@@ -279,6 +279,8 @@ pub struct SlashCommand {
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

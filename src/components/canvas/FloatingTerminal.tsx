@@ -498,6 +498,7 @@ export default memo(function FloatingTerminal({ term }: FloatingTerminalProps) {
             key={term.terminalId}
             sessionId={term.terminalId}
             cwd={term.cwd}
+            initialName={term.title && term.title !== "Claude" ? term.title : undefined}
             skipPermissions={term.claudeSkipPermissions}
             isActive={isActive}
           />

@@ -25,7 +25,8 @@ import { closeTerminal, closeProviderSession, linkSessionToDiscord, unlinkSessio
 import { pushToast } from "./lib/notifications";
 import { useDelegationStore } from "./stores/delegationStore";
 import {
-  PROVIDER_SESSIONS_STORAGE_KEY,
+  readProviderSessionMetadata,
+  readProviderSessionMetadataSnapshot,
   resolveSessionProviderState,
   useProviderSessionStore,
   flushSave as flushProviderSessionSave,
@@ -241,8 +242,7 @@ function App() {
         // is a stale snapshot that isn't updated when the user renames a session.
         let savedSessions: Record<string, { name?: string; cwd?: string }> = {};
         try {
-          const raw = localStorage.getItem(PROVIDER_SESSIONS_STORAGE_KEY);
-          if (raw) savedSessions = JSON.parse(raw);
+          savedSessions = readProviderSessionMetadataSnapshot();
         } catch (e) {
           console.warn("[discord] Failed to read session store:", e);
         }
@@ -605,11 +605,11 @@ function App() {
             const newest = terminals[terminals.length - 1];
             if (newest?.panelType === "claude") {
               const sid = newest.terminalId;
-              // Pre-create a blank unlocked session. The empty chat picker owns
-              // the pre-first-send provider choice; first send locks it.
+              // The dialog provider choice is explicit, so persist and lock it
+              // before the panel mounts.
               // The chat shell's createSession effect is idempotent, so this
               // primes name/cwd before the panel mounts.
-              useProviderSessionStore.getState().createSession(sid, sessionName, false, undefined, cwd, provider, false);
+              useProviderSessionStore.getState().createSession(sid, sessionName, false, undefined, cwd, provider, true);
               if (sessionName) {
                 // Auto-link to Discord (silently fails if bot not running)
                 linkSessionToDiscord(sid, sessionName, cwd).catch(() => {});
@@ -625,12 +625,9 @@ function App() {
           let name: string | undefined;
           let savedCwd = "";
           try {
-            const raw = localStorage.getItem(PROVIDER_SESSIONS_STORAGE_KEY);
-            if (raw) {
-              const d = JSON.parse(raw);
-              name = d[sessionId]?.name;
-              savedCwd = d[sessionId]?.cwd || "";
-            }
+            const saved = readProviderSessionMetadata(sessionId);
+            name = saved?.name;
+            savedCwd = saved?.cwd || "";
           } catch (e) {
             console.warn("[session] Failed to read session metadata from localStorage:", e);
           }

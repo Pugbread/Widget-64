@@ -29,15 +29,19 @@ import type {
   ProviderSessionRuntimeMetadataMap,
   ProviderSessionRuntimeMetadataPatch,
 } from "../contracts/providerRuntime";
+import { stripSystemReminderBlocks } from "../lib/promptSanitization";
 
 // Keep the persisted key stable for existing installs; the exported
 // provider-neutral name is the preferred surface for new callers.
 export const PROVIDER_SESSIONS_STORAGE_KEY = "terminal64-claude-sessions";
 /** @deprecated Use PROVIDER_SESSIONS_STORAGE_KEY. */
 export const STORAGE_KEY = PROVIDER_SESSIONS_STORAGE_KEY;
+export const PROVIDER_SESSION_META_ROW_PREFIX = `${PROVIDER_SESSIONS_STORAGE_KEY}:row:`;
+export const PROVIDER_SESSION_META_INDEX_KEY = `${PROVIDER_SESSIONS_STORAGE_KEY}:index`;
 const STALE_UNNAMED_META_MS = 14 * 24 * 60 * 60 * 1000;
 const MAX_PERSISTED_META_ENTRIES = 160;
 const MAX_LOCAL_TRANSCRIPT_MESSAGES = 500;
+const MAX_COMPACT_LOCAL_TRANSCRIPT_MESSAGES = 80;
 
 export interface OpenAiProviderSessionMetadata {
   codexThreadId: string | null;
@@ -742,16 +746,14 @@ export interface PersistedSessionMeta {
   localTranscript?: ChatMessage[];
 }
 
-// Bump when the shape of PersistedSessionMeta changes. Older clients that
-// encounter a higher version refuse to overwrite — see downgradeLockActive.
+// Bump when the shape of PersistedSessionMeta changes. Older clients preserve
+// rows written by newer schemas, but they must still save current-schema rows.
 const CURRENT_SCHEMA_VERSION = 8;
 
-// Flips true once we see persisted data written by a newer schema than we
-// understand. While active, saveToStorage is a no-op so a downgraded client
-// can't clobber data the next rollforward relies on.
-let downgradeLockActive = false;
+const newerSchemaMetaIds = new Set<string>();
 let persistedMetaCache: Record<string, PersistedSessionMeta> | null = null;
 let lastPersistedMetaJson: string | null = null;
+let lastPersistedMetaIndexJson: string | null = null;
 
 export interface ProviderTask {
   id: string;
@@ -1098,38 +1100,57 @@ function clonePersistedMeta(data: Record<string, PersistedSessionMeta>): Record<
   return { ...data };
 }
 
-function readPersistedMeta(): Record<string, PersistedSessionMeta> {
-  if (persistedMetaCache) return clonePersistedMeta(persistedMetaCache);
+function providerSessionMetaRowKey(sessionId: string): string {
+  return `${PROVIDER_SESSION_META_ROW_PREFIX}${sessionId}`;
+}
 
-  let raw: string | null = null;
-  try {
-    raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== "object") return {};
-    const data = parsed as Record<string, PersistedSessionMeta>;
-    // Forward-compat guard: if any entry was written by a newer schema, flip
-    // the read-only flag so we don't silently downgrade it on the next write.
-    if (!downgradeLockActive) {
-      for (const entry of Object.values(data)) {
-        const v = (entry as { schemaVersion?: number })?.schemaVersion ?? 0;
-        if (v > CURRENT_SCHEMA_VERSION) {
-          console.warn(
-            `[providerSessionStore] Persisted metadata schemaVersion ${v} exceeds supported ${CURRENT_SCHEMA_VERSION}. ` +
-              "Entering read-only mode to avoid downgrading newer data.",
-          );
-          downgradeLockActive = true;
-          break;
-        }
+function readPersistedMetaRowIds(indexRaw: string | null): Set<string> {
+  const ids = new Set<string>();
+  if (indexRaw) {
+    try {
+      const parsed = JSON.parse(indexRaw) as unknown;
+      const rawIds = Array.isArray(parsed)
+        ? parsed
+        : isRecord(parsed) && Array.isArray(parsed.ids)
+          ? parsed.ids
+          : [];
+      for (const id of rawIds) {
+        if (typeof id === "string" && id) ids.add(id);
       }
+    } catch (e) {
+      console.warn("[providerSessionStore] Failed to parse provider metadata row index:", e);
     }
-    persistedMetaCache = data;
-    lastPersistedMetaJson = raw;
-    return data;
+  }
+
+  try {
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (!key?.startsWith(PROVIDER_SESSION_META_ROW_PREFIX)) continue;
+      const id = key.slice(PROVIDER_SESSION_META_ROW_PREFIX.length);
+      if (id) ids.add(id);
+    }
   } catch (e) {
-    // Parse failure: back up the raw bytes so a corrupted blob is still
-    // recoverable (names, drafts). Then return empty so the app keeps working.
-    if (raw) {
+    console.warn("[providerSessionStore] Failed to scan provider metadata row keys:", e);
+  }
+
+  return ids;
+}
+
+function parsePersistedMetaBlob(
+  raw: string | null,
+  source: string,
+): Record<string, PersistedSessionMeta> {
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") {
+      return {};
+    }
+    return parsed as Record<string, PersistedSessionMeta>;
+  } catch (e) {
+    if (source === STORAGE_KEY) {
+      // Parse failure: back up the raw bytes so a corrupted blob is still
+      // recoverable (names, drafts). Row metadata can still hydrate below.
       try {
         const backup = { savedAt: new Date().toISOString(), raw };
         localStorage.setItem(`${STORAGE_KEY}.bak`, JSON.stringify(backup));
@@ -1141,18 +1162,155 @@ function readPersistedMeta(): Record<string, PersistedSessionMeta> {
         console.warn("[providerSessionStore] Failed to back up corrupt metadata:", backupErr);
       }
     } else {
-      console.warn("[providerSessionStore] Failed to parse persisted metadata:", e);
+      console.warn(`[providerSessionStore] Failed to parse persisted metadata row "${source}":`, e);
     }
     return {};
   }
 }
 
+function readPersistedMetaRows(indexRaw: string | null): Record<string, PersistedSessionMeta> {
+  const rows: Record<string, PersistedSessionMeta> = {};
+  for (const id of readPersistedMetaRowIds(indexRaw)) {
+    const key = providerSessionMetaRowKey(id);
+    let raw: string | null = null;
+    try {
+      raw = localStorage.getItem(key);
+    } catch (e) {
+      console.warn(`[providerSessionStore] Failed to read provider metadata row "${id}":`, e);
+      continue;
+    }
+    const parsed = parsePersistedMetaBlob(raw, key);
+    const row = parsed[id] ?? (isRecord(parsed) ? parsed as unknown as PersistedSessionMeta : undefined);
+    if (row && isRecord(row)) {
+      rows[id] = row as PersistedSessionMeta;
+    }
+  }
+  return rows;
+}
+
+function trackPersistedMetaSchemas(data: Record<string, PersistedSessionMeta>) {
+  newerSchemaMetaIds.clear();
+  for (const [id, entry] of Object.entries(data)) {
+    const v = (entry as { schemaVersion?: number })?.schemaVersion ?? 0;
+    if (v > CURRENT_SCHEMA_VERSION) {
+      console.warn(
+        `[providerSessionStore] Persisted metadata schemaVersion ${v} for ${id} exceeds supported ${CURRENT_SCHEMA_VERSION}. ` +
+          "Preserving that row without blocking current-session saves.",
+      );
+      newerSchemaMetaIds.add(id);
+    }
+  }
+}
+
+function readPersistedMeta(): Record<string, PersistedSessionMeta> {
+  let raw: string | null = null;
+  let indexRaw: string | null = null;
+  try {
+    raw = localStorage.getItem(STORAGE_KEY);
+    indexRaw = localStorage.getItem(PROVIDER_SESSION_META_INDEX_KEY);
+    if (
+      persistedMetaCache
+      && raw === lastPersistedMetaJson
+      && indexRaw === lastPersistedMetaIndexJson
+    ) {
+      return clonePersistedMeta(persistedMetaCache);
+    }
+    const aggregateData = parsePersistedMetaBlob(raw, STORAGE_KEY);
+    const rowData = readPersistedMetaRows(indexRaw);
+    const data = { ...aggregateData, ...rowData };
+    trackPersistedMetaSchemas(data);
+    persistedMetaCache = data;
+    lastPersistedMetaJson = raw;
+    lastPersistedMetaIndexJson = indexRaw;
+    return data;
+  } catch (e) {
+    console.warn("[providerSessionStore] Failed to read persisted metadata:", e);
+    persistedMetaCache = {};
+    lastPersistedMetaJson = raw;
+    lastPersistedMetaIndexJson = indexRaw;
+    newerSchemaMetaIds.clear();
+    return {};
+  }
+}
+
+function writePersistedMetaRows(data: Record<string, PersistedSessionMeta>) {
+  const nextIds = new Set(Object.keys(data));
+  let rowWriteError: unknown = null;
+
+  for (const [id, row] of Object.entries(data)) {
+    const key = providerSessionMetaRowKey(id);
+    const value = JSON.stringify(row);
+    try {
+      localStorage.setItem(key, value);
+    } catch (e) {
+      try {
+        // The old aggregate blob is the largest item and is no longer
+        // authoritative. Free it before retrying the per-session upsert.
+        localStorage.removeItem(STORAGE_KEY);
+        localStorage.setItem(key, value);
+      } catch (retryErr) {
+        rowWriteError ??= retryErr;
+        console.warn(`[providerSessionStore] Failed to write provider metadata row "${id}":`, retryErr);
+      }
+    }
+  }
+
+  for (const id of readPersistedMetaRowIds(localStorage.getItem(PROVIDER_SESSION_META_INDEX_KEY))) {
+    if (nextIds.has(id)) continue;
+    try {
+      localStorage.removeItem(providerSessionMetaRowKey(id));
+    } catch (e) {
+      console.warn(`[providerSessionStore] Failed to remove stale provider metadata row "${id}":`, e);
+    }
+  }
+
+  try {
+    localStorage.setItem(
+      PROVIDER_SESSION_META_INDEX_KEY,
+      JSON.stringify({
+        schemaVersion: CURRENT_SCHEMA_VERSION,
+        updatedAt: Date.now(),
+        ids: [...nextIds],
+      }),
+    );
+  } catch (e) {
+    // Rows are discoverable by prefix scan, so a failed index write is noisy
+    // but not data loss.
+    console.warn("[providerSessionStore] Failed to write provider metadata row index:", e);
+  }
+
+  if (rowWriteError) throw rowWriteError;
+}
+
 function writePersistedMeta(data: Record<string, PersistedSessionMeta>) {
   const json = JSON.stringify(data);
-  if (json === lastPersistedMetaJson) return;
-  localStorage.setItem(STORAGE_KEY, json);
+  writePersistedMetaRows(data);
+  try {
+    if (json !== lastPersistedMetaJson) {
+      localStorage.setItem(STORAGE_KEY, json);
+    }
+  } catch (e) {
+    // Compatibility only: the row store above is the source of truth. Keeping
+    // the legacy aggregate best-effort prevents one huge blob from deciding
+    // whether a new Codex session survives restart.
+    try {
+      localStorage.removeItem(STORAGE_KEY);
+    } catch {
+      // Ignore cleanup failure; row metadata has already been written.
+    }
+    console.warn("[providerSessionStore] Provider metadata rows saved; legacy aggregate write skipped:", e);
+  }
   persistedMetaCache = data;
-  lastPersistedMetaJson = json;
+  lastPersistedMetaJson = localStorage.getItem(STORAGE_KEY);
+  lastPersistedMetaIndexJson = localStorage.getItem(PROVIDER_SESSION_META_INDEX_KEY);
+}
+
+export function readProviderSessionMetadataSnapshot(): Record<string, PersistedSessionMeta> {
+  return readPersistedMeta();
+}
+
+export function readProviderSessionMetadata(sessionId: string): PersistedSessionMeta | null {
+  return readPersistedMeta()[sessionId] ?? null;
 }
 
 function deletePersistedMeta(sessionId: string) {
@@ -1272,9 +1430,22 @@ function shouldPersistLocalTranscript(provider: ProviderId): boolean {
   return providerPersistsLocalTranscript(provider);
 }
 
-function localTranscriptFromMessages(provider: ProviderId, messages: ChatMessage[]): ChatMessage[] | undefined {
-  if (!shouldPersistLocalTranscript(provider) || messages.length === 0) return undefined;
-  return messages.slice(-MAX_LOCAL_TRANSCRIPT_MESSAGES);
+function shouldPersistLocalTranscriptForState(providerState: ProviderSessionState): boolean {
+  if (shouldPersistLocalTranscript(providerState.provider)) return true;
+  // Codex normally hydrates from rollout JSONL via its external thread id, but
+  // app-server sessions can restart before that rollout is readable. Persist a
+  // bounded UI transcript as a fallback; provider history still wins when it
+  // has messages.
+  return providerState.provider === "openai";
+}
+
+function localTranscriptFromMessages(
+  providerState: ProviderSessionState,
+  messages: ChatMessage[],
+  maxMessages = MAX_LOCAL_TRANSCRIPT_MESSAGES,
+): ChatMessage[] | undefined {
+  if (!shouldPersistLocalTranscriptForState(providerState) || messages.length === 0) return undefined;
+  return messages.slice(-maxMessages);
 }
 
 function localTranscriptFromUnknown(value: unknown): ChatMessage[] | null {
@@ -1286,6 +1457,7 @@ function localTranscriptFromUnknown(value: unknown): ChatMessage[] | null {
       && typeof message.id === "string";
   }).map((message) => ({
     ...message,
+    content: message.role === "user" ? stripSystemReminderBlocks(message.content) : message.content,
     ...(Array.isArray(message.toolCalls)
       ? { toolCalls: message.toolCalls.map((toolCall) => normalizeProviderToolCall(toolCall)) }
       : {}),
@@ -1298,18 +1470,37 @@ function localTranscriptFromProviderRuntimeMetadata(
   return localTranscriptFromUnknown(metadata?.runtimePayload.localTranscript);
 }
 
+function sanitizeVisibleMessages(messages: ChatMessage[]): ChatMessage[] {
+  let changed = false;
+  const next = messages.map((message) => {
+    if (message.role !== "user") return message;
+    const content = stripSystemReminderBlocks(message.content);
+    if (content === message.content) return message;
+    changed = true;
+    return { ...message, content };
+  });
+  return changed ? next : messages;
+}
+
 function withLocalTranscriptRuntimePayload(
   providerState: ProviderSessionState,
   provider: ProviderId,
   localTranscript: ChatMessage[] | undefined,
+  shouldStoreLocalTranscript: boolean,
 ): ProviderSessionState {
-  if (!shouldPersistLocalTranscript(provider)) return providerState;
   const existing = providerState.runtimeMetadata[provider];
   const runtimePayload = { ...(existing?.runtimePayload ?? {}) };
-  if (localTranscript && localTranscript.length > 0) {
+  if (shouldStoreLocalTranscript && localTranscript && localTranscript.length > 0) {
     runtimePayload.localTranscript = localTranscript;
   } else {
     delete runtimePayload.localTranscript;
+  }
+  if (
+    !shouldStoreLocalTranscript
+    && existing
+    && localTranscriptFromProviderRuntimeMetadata(existing) === null
+  ) {
+    return providerState;
   }
   return createProviderState({
     ...providerState,
@@ -1328,27 +1519,41 @@ function buildPersistedMeta(
   sessions: Record<string, ProviderSession>,
   dropSeedTranscripts: boolean,
   aggressivePrune: boolean,
+  options: {
+    includeExisting?: boolean;
+    maxLocalTranscriptMessages?: number;
+    dropLocalTranscripts?: boolean;
+  } = {},
 ): Record<string, PersistedSessionMeta> {
   const existing = readPersistedMeta();
-  const next = clonePersistedMeta(existing);
+  const next = options.includeExisting === false ? {} : clonePersistedMeta(existing);
   const activeSessionIds = new Set<string>();
   const now = Date.now();
 
   for (const [id, s] of Object.entries(sessions)) {
     if (s.ephemeral) continue;
     activeSessionIds.add(id);
+    if (newerSchemaMetaIds.has(id) && existing[id]) {
+      continue;
+    }
     const baseProviderState = resolveSessionProviderState(s);
     const providerState = normalizeProviderState(baseProviderState, s);
     const persistedProviderStateBase = dropSeedTranscripts
       ? { ...providerState, seedTranscript: null }
       : providerState;
-    const localTranscript = dropSeedTranscripts
+    const shouldStoreLocalTranscript =
+      !options.dropLocalTranscripts
+      && shouldPersistLocalTranscriptForState(providerState);
+    const maxLocalTranscriptMessages = options.maxLocalTranscriptMessages
+      ?? (dropSeedTranscripts ? MAX_COMPACT_LOCAL_TRANSCRIPT_MESSAGES : MAX_LOCAL_TRANSCRIPT_MESSAGES);
+    const localTranscript = options.dropLocalTranscripts
       ? undefined
-      : localTranscriptFromMessages(providerState.provider, s.messages);
+      : localTranscriptFromMessages(providerState, s.messages, maxLocalTranscriptMessages);
     const persistedProviderState = withLocalTranscriptRuntimePayload(
       persistedProviderStateBase,
       providerState.provider,
       localTranscript,
+      shouldStoreLocalTranscript,
     );
     const compat = providerCompatibilityFields(persistedProviderState);
     next[id] = {
@@ -1380,10 +1585,14 @@ function loadMetadata(sessionId: string): PersistedSessionMeta | null {
   if (!entry) return null;
   const providerState = providerStateFromPersistedMeta(entry);
   const compat = providerCompatibilityFields(providerState);
-  const localTranscript = shouldPersistLocalTranscript(compat.provider)
-    ? localTranscriptFromProviderRuntimeMetadata(providerState.runtimeMetadata[compat.provider])
-      ?? localTranscriptFromUnknown(entry.localTranscript)
+  const persistedLocalTranscript = localTranscriptFromProviderRuntimeMetadata(providerState.runtimeMetadata[compat.provider])
+    ?? localTranscriptFromUnknown(entry.localTranscript);
+  const localTranscript = shouldPersistLocalTranscript(compat.provider) || persistedLocalTranscript
+    ? persistedLocalTranscript
     : null;
+  const seedFromLocalTranscript = compat.provider === "openai"
+    && !compat.codexThreadId
+    && !!localTranscript?.length;
   return {
     sessionId: entry.sessionId || sessionId,
     name: entry.name || "",
@@ -1400,7 +1609,11 @@ function loadMetadata(sessionId: string): PersistedSessionMeta | null {
     codexThreadId: compat.codexThreadId,
     // v2 blobs lack seedTranscript — leave undefined so consumers treat the
     // session as un-seeded. Stored as ChatMessage[] when present.
-    ...(compat.seedTranscript ? { seedTranscript: compat.seedTranscript } : {}),
+    ...(seedFromLocalTranscript
+      ? { seedTranscript: localTranscript }
+      : compat.seedTranscript
+        ? { seedTranscript: compat.seedTranscript }
+        : {}),
     ...(localTranscript ? { localTranscript } : {}),
     // v3 and earlier didn't carry per-session model/effort; v4+ does.
     selectedModel: compat.selectedModel,
@@ -1412,11 +1625,8 @@ function loadMetadata(sessionId: string): PersistedSessionMeta | null {
 // history and are reloaded on demand; providers without durable history keep a
 // bounded local transcript so reloads do not reopen an empty chat.
 function saveToStorage(sessions: Record<string, ProviderSession>) {
-  if (downgradeLockActive) return;
   try {
     const data = buildPersistedMeta(sessions, false, false);
-    // readPersistedMeta may have flipped the lock on a newer-schema read.
-    if (downgradeLockActive) return;
     writePersistedMeta(data);
   } catch (e) {
     try {
@@ -1425,7 +1635,23 @@ function saveToStorage(sessions: Record<string, ProviderSession>) {
       writePersistedMeta(buildPersistedMeta(sessions, true, true));
       console.warn("[providerSessionStore] Saved compact metadata after localStorage quota pressure:", e);
     } catch (retryErr) {
-      console.error("[providerSessionStore] Failed to save session metadata:", retryErr);
+      try {
+        writePersistedMeta(buildPersistedMeta(sessions, true, true, {
+          includeExisting: false,
+          maxLocalTranscriptMessages: 20,
+        }));
+        console.warn("[providerSessionStore] Saved active-session-only metadata after localStorage quota pressure:", retryErr);
+      } catch (activeOnlyErr) {
+        try {
+          writePersistedMeta(buildPersistedMeta(sessions, true, true, {
+            includeExisting: false,
+            dropLocalTranscripts: true,
+          }));
+          console.warn("[providerSessionStore] Saved active metadata without local transcripts after localStorage quota pressure:", activeOnlyErr);
+        } catch (metadataOnlyErr) {
+          console.error("[providerSessionStore] Failed to save session metadata:", metadataOnlyErr);
+        }
+      }
     }
   }
 }
@@ -1456,7 +1682,7 @@ function debouncedSave() {
 
 function sessionNeedsLocalTranscriptSave(session: ProviderSession | undefined): boolean {
   if (!session || session.ephemeral) return false;
-  return shouldPersistLocalTranscript(resolveSessionProviderState(session).provider);
+  return shouldPersistLocalTranscriptForState(resolveSessionProviderState(session));
 }
 
 function patchSession(sessionId: string, patch: Partial<ProviderSession>) {
@@ -1574,6 +1800,30 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
   createSession: (sessionId, initialName, ephemeral, skipOpenwolf, cwd, provider, providerLocked) => {
     const existing = get().sessions[sessionId];
     if (existing) {
+      const explicitProvider = provider;
+      const canAdoptExplicitProvider =
+        !!explicitProvider
+        && !existing.providerLocked
+        && !existing.hasBeenStarted
+        && existing.promptCount === 0
+        && existing.messages.length === 0
+        && existing.promptQueue.length === 0
+        && !existing.isStreaming
+        && !existing.forkParentSessionId
+        && !existing.resumeAtUuid
+        && !getProviderRuntimeResumeId(resolveSessionProviderState(existing), resolveSessionProviderState(existing).provider);
+      if (canAdoptExplicitProvider && resolveSessionProviderState(existing).provider !== explicitProvider) {
+        set((s) => {
+          const current = s.sessions[sessionId];
+          if (!current) return s;
+          const updated = updateSession(s.sessions, sessionId, {
+            provider: explicitProvider,
+            ...(providerLocked !== undefined ? { providerLocked } : {}),
+          });
+          if (!current.ephemeral) saveToStorage(updated);
+          return { sessions: updated };
+        });
+      }
       if (initialName && !existing.name) {
         set((s) => {
           const updated = updateSession(s.sessions, sessionId, { name: initialName });
@@ -1683,7 +1933,7 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
           name: seededName,
           cwd: seededCwd,
           promptQueue: [],
-          hasBeenStarted: false,
+          hasBeenStarted: seededPromptCount > 0,
           draftPrompt: seededDraft,
           activeLoop: null,
           ephemeral: !!ephemeral,
@@ -1703,7 +1953,18 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
           ...seededProviderCompat,
         },
       };
-      if (!ephemeral) debouncedSave();
+      if (!ephemeral) {
+        const shouldSaveImmediately =
+          !!seededName.trim()
+          || !!seededCwd
+          || provider !== undefined
+          || providerLocked !== undefined;
+        if (shouldSaveImmediately) {
+          saveToStorage(sessions);
+        } else {
+          debouncedSave();
+        }
+      }
       return { sessions };
     });
 
@@ -1778,14 +2039,18 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
     set((s) => {
       const session = s.sessions[sessionId];
       if (!session) return s;
-      const msg: ChatMessage = { id: uuidv4(), role: "user", content: text, timestamp: Date.now() };
+      const msg: ChatMessage = { id: uuidv4(), role: "user", content: stripSystemReminderBlocks(text), timestamp: Date.now() };
       const shouldLockProvider = !session.providerLocked;
       const updated = updateSession(s.sessions, sessionId, {
         messages: [...session.messages, msg],
         error: null,
         providerLocked: true,
       });
-      if ((shouldLockProvider && !session.ephemeral) || sessionNeedsLocalTranscriptSave(session)) debouncedSave();
+      if (sessionNeedsLocalTranscriptSave(session)) {
+        saveToStorage(updated);
+      } else if (shouldLockProvider && !session.ephemeral) {
+        debouncedSave();
+      }
       return { sessions: updated };
     });
   },
@@ -1819,7 +2084,7 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
         ...(normalizedToolCalls !== undefined && { toolCalls: normalizedToolCalls }),
       };
       const updated = updateSession(s.sessions, sessionId, { messages: [...session.messages, msg], streamingText: "" });
-      if (sessionNeedsLocalTranscriptSave(session)) debouncedSave();
+      if (sessionNeedsLocalTranscriptSave(session)) saveToStorage(updated);
       return { sessions: updated };
     });
   },
@@ -1848,7 +2113,7 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
             const messages = msgs.slice();
             messages[i] = { ...msg, toolCalls: updatedToolCalls };
             const updated = updateSession(s.sessions, sessionId, { messages });
-            if (sessionNeedsLocalTranscriptSave(session)) debouncedSave();
+            if (sessionNeedsLocalTranscriptSave(session)) saveToStorage(updated);
             return { sessions: updated };
           }
         }
@@ -1882,7 +2147,7 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
             const messages = msgs.slice();
             messages[i] = { ...msg, toolCalls: updatedToolCalls };
             const updated = updateSession(s.sessions, sessionId, { messages });
-            if (sessionNeedsLocalTranscriptSave(session)) debouncedSave();
+            if (sessionNeedsLocalTranscriptSave(session)) saveToStorage(updated);
             return { sessions: updated };
           }
         }
@@ -2061,7 +2326,8 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
         && previousResumeId !== nextResumeId
         && !!nextResumeId
         && !!session.cwd
-        && session.jsonlLoaded;
+        && session.jsonlLoaded
+        && !session.isStreaming;
       hydrateCwd = session.cwd;
       const updated = updateSession(s.sessions, sessionId, {
         runtimeMetadata: { [provider]: next },
@@ -2198,20 +2464,21 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
   // Refuses to shrink existing history so a stale load can't clobber a live
   // session that has already accumulated turns.
   loadFromDisk: (sessionId, messages) => {
+    const visibleMessages = sanitizeVisibleMessages(messages);
     set((s) => {
       const session = s.sessions[sessionId];
       if (!session) return s;
-      if (session.messages.length >= messages.length) {
+      if (session.messages.length >= visibleMessages.length) {
         // Still flip the loaded flag — callers rely on it to stop "loading" UI.
-        const hasUserTurn = messages.some((m) => m.role === "user") || session.promptCount > 0;
+        const hasUserTurn = visibleMessages.some((m) => m.role === "user") || session.promptCount > 0;
         return { sessions: updateSession(s.sessions, sessionId, {
           jsonlLoaded: true,
           providerLocked: session.providerLocked || hasUserTurn,
         }) };
       }
-      const promptCount = messages.filter((m) => m.role === "user").length;
+      const promptCount = visibleMessages.filter((m) => m.role === "user").length;
       return { sessions: updateSession(s.sessions, sessionId, {
-        messages,
+        messages: visibleMessages,
         promptCount,
         hasBeenStarted: promptCount > 0,
         providerLocked: session.providerLocked || promptCount > 0,
@@ -2224,15 +2491,16 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
   // may shrink the visible transcript after rewind/truncate. Empty or missing
   // history still preserves live in-memory messages.
   replaceFromDisk: (sessionId, messages) => {
+    const visibleMessages = sanitizeVisibleMessages(messages);
     set((s) => {
       const session = s.sessions[sessionId];
       if (!session) return s;
-      if (messages.length === 0) {
+      if (visibleMessages.length === 0) {
         return { sessions: updateSession(s.sessions, sessionId, { jsonlLoaded: true }) };
       }
-      const promptCount = messages.filter((m) => m.role === "user").length;
+      const promptCount = visibleMessages.filter((m) => m.role === "user").length;
       return { sessions: updateSession(s.sessions, sessionId, {
-        messages,
+        messages: visibleMessages,
         promptCount,
         hasBeenStarted: promptCount > 0,
         providerLocked: session.providerLocked || promptCount > 0,
@@ -2244,12 +2512,13 @@ const providerSessionStore = create<ProviderSessionStoreState>((set, get) => ({
   refreshFromHistory: (sessionId, cwd) => hydrateSessionHistory(sessionId, cwd, "replace"),
 
   mergeFromDisk: (sessionId, incoming) => {
+    const visibleIncoming = sanitizeVisibleMessages(incoming);
     set((s) => {
       const session = s.sessions[sessionId];
       if (!session) return s;
-      if (incoming.length === 0) return s;
+      if (visibleIncoming.length === 0) return s;
       const existingIds = new Set(session.messages.map((m) => m.id));
-      const toAppend = incoming.filter((m) => !existingIds.has(m.id));
+      const toAppend = visibleIncoming.filter((m) => !existingIds.has(m.id));
       if (toAppend.length === 0) return s;
       const merged = [...session.messages, ...toAppend];
       const promptCount = merged.filter((m) => m.role === "user").length;

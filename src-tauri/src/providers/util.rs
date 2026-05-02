@@ -32,14 +32,14 @@ pub fn expanded_tool_path() -> String {
         let program_files =
             std::env::var("ProgramFiles").unwrap_or_else(|_| "C:\\Program Files".to_string());
         format!(
-            "{appdata}\\npm;{home}\\.cargo\\bin;{home}\\.npm-global\\bin;{localappdata}\\Programs\\nodejs;{program_files}\\nodejs;{existing}"
+            "{appdata}\\npm;{home}\\.cargo\\bin;{home}\\.npm-global\\bin;{home}\\.aftman\\bin;{home}\\.rokit\\bin;{home}\\.foreman\\bin;{home}\\.wally\\bin;{localappdata}\\Programs\\nodejs;{program_files}\\nodejs;{existing}"
         )
     }
     #[cfg(not(target_os = "windows"))]
     {
         let home = std::env::var("HOME").unwrap_or_default();
         format!(
-            "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:{home}/.local/bin:{home}/.cargo/bin:{home}/.npm-global/bin:/opt/homebrew/lib/node_modules/.bin:{existing}"
+            "/opt/homebrew/bin:/opt/homebrew/sbin:/usr/local/bin:/usr/local/sbin:{home}/.local/bin:{home}/.cargo/bin:{home}/.npm-global/bin:{home}/.aftman/bin:{home}/.rokit/bin:{home}/.foreman/bin:{home}/.wally/bin:/opt/homebrew/lib/node_modules/.bin:{existing}"
         )
     }
 }
@@ -474,5 +474,22 @@ mod tests {
             Some("Terminal64TruncatedNonJsonEvent")
         );
         assert!(parsed["preview"].as_str().unwrap().len() <= TRUNCATE_HEAD_BYTES);
+    }
+
+    #[test]
+    fn expanded_tool_path_includes_roblox_toolchain_bins() {
+        let path = expanded_tool_path();
+        #[cfg(target_os = "windows")]
+        {
+            assert!(path.contains(".aftman\\bin"));
+            assert!(path.contains(".rokit\\bin"));
+            assert!(path.contains(".foreman\\bin"));
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert!(path.contains(".aftman/bin"));
+            assert!(path.contains(".rokit/bin"));
+            assert!(path.contains(".foreman/bin"));
+        }
     }
 }

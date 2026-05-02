@@ -6,7 +6,7 @@ import {
   useSettingsStore,
 } from "../../stores/settingsStore";
 import {
-  PROVIDER_SESSIONS_STORAGE_KEY,
+  readProviderSessionMetadataSnapshot,
   resolveSessionProviderState,
   useProviderSessionStore,
 } from "../../stores/providerSessionStore";
@@ -285,18 +285,15 @@ function getNamedSessions(
 
   // Persisted sessions
   try {
-      const raw = localStorage.getItem(PROVIDER_SESSIONS_STORAGE_KEY);
-    if (raw) {
-      const data = JSON.parse(raw);
-      for (const [id, session] of Object.entries(data as Record<string, any>)) {
-        if (
-          session.name &&
-          !seen.has(id) &&
-          cwdMatch(session.cwd, cwd) &&
-          providerMatch(session)
-        ) {
-          results.push({ id, name: session.name, messageCount: session.messages?.length || 0 });
-        }
+    const data = readProviderSessionMetadataSnapshot();
+    for (const [id, session] of Object.entries(data)) {
+      if (
+        session.name &&
+        !seen.has(id) &&
+        cwdMatch(session.cwd, cwd) &&
+        providerMatch(session)
+      ) {
+        results.push({ id, name: session.name, messageCount: session.localTranscript?.length || 0 });
       }
     }
   } catch (e) {

@@ -42,6 +42,7 @@ import type {
 import { joinPath } from "./platform";
 import { getProviderDefaultControlValues, isClaudePermissionId, type ProviderId } from "./providers";
 import { getDefaultProviderPermissionId } from "./providerPermissions";
+import { stripSystemReminderBlocks } from "./promptSanitization";
 import { normalizeProviderToolCall } from "../contracts/providerEvents";
 import type { ProviderTurnInput } from "../contracts/providerRuntime";
 
@@ -379,8 +380,8 @@ export function onCodexDone(callback: (payload: CodexDone) => void): Promise<Unl
   return listen<CodexDone>("codex-done", (event) => callback(event.payload));
 }
 
-export async function listSlashCommands(): Promise<SlashCommand[]> {
-  return invoke("list_slash_commands");
+export async function listSlashCommands(cwd?: string): Promise<SlashCommand[]> {
+  return invoke("list_slash_commands", { cwd: cwd ?? null });
 }
 
 export async function resolvePermission(requestId: string, allow: boolean): Promise<void> {
@@ -439,7 +440,7 @@ export function mapHistoryMessages(history: HistoryMessage[]): ChatMessage[] {
     const msg: ChatMessage = {
       id: m.id,
       role: m.role as "user" | "assistant",
-      content: m.content,
+      content: m.role === "user" ? stripSystemReminderBlocks(m.content) : m.content,
       timestamp: m.timestamp,
       ...(toolCalls !== undefined && { toolCalls }),
     };

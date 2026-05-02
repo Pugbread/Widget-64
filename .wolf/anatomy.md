@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-01T16:00:01.045Z
-> Files: 522 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-02T04:00:00.537Z
+> Files: 524 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ./
 
@@ -19,6 +19,8 @@
 - `terminal64-delegation-2026-04-30T02-59-53-683Z-ac9b6cf8.md` — Terminal 64 Delegation Team Chat (~5087 tok)
 - `terminal64-delegation-2026-04-30T03-36-58-239Z-94e817c3.md` — Terminal 64 Delegation Team Chat (~5725 tok)
 - `terminal64-delegation-2026-04-30T03-56-06-151Z-9f72d378.md` — Terminal 64 Delegation Team Chat (~4472 tok)
+- `terminal64-delegation-2026-05-01T23-59-24-273Z-21ee1c11.md` — Terminal 64 Delegation Team Chat (~5266 tok)
+- `terminal64-delegation-2026-05-02T00-25-51-345Z-a63a67ec.md` — Terminal 64 Delegation Team Chat (~2951 tok)
 - `tsconfig.json` — TypeScript configuration (~216 tok)
 - `tsconfig.node.json` (~67 tok)
 - `vite.config.ts` — Vite build configuration (~140 tok)

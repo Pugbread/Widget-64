@@ -2633,9 +2633,14 @@ fn list_mcp_servers(cwd: String) -> Result<Vec<McpServer>, String> {
 }
 
 #[tauri::command]
-fn list_slash_commands() -> Result<Vec<SlashCommand>, String> {
+fn list_slash_commands(cwd: Option<String>) -> Result<Vec<SlashCommand>, String> {
     let home = dirs::home_dir().ok_or("Cannot find home directory")?;
     let claude_dir = home.join(".claude");
+    let project_cwd = cwd
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(std::path::PathBuf::from);
 
     let mut commands = Vec::new();
 
@@ -2760,6 +2765,7 @@ fn list_slash_commands() -> Result<Vec<SlashCommand>, String> {
             description: desc.to_string(),
             source: "built-in".to_string(),
             usage: usage.map(|u| u.to_string()),
+            kind: Some("builtin".to_string()),
         });
     }
 
@@ -2859,6 +2865,7 @@ fn list_slash_commands() -> Result<Vec<SlashCommand>, String> {
             description: desc.to_string(),
             source: source.to_string(),
             usage: None,
+            kind: Some("skill".to_string()),
         })
     }
 
@@ -2878,13 +2885,29 @@ fn list_slash_commands() -> Result<Vec<SlashCommand>, String> {
             description: desc,
             source: source.to_string(),
             usage: None,
+            kind: Some("command".to_string()),
         })
     }
 
-    // Scan plugins cache (installed versions)
-    let cache_dir = claude_dir.join("plugins").join("cache");
-    if cache_dir.exists() {
-        scan_dir(&cache_dir, &mut commands);
+    // Scan project-level skills (.claude/skills/)
+    if let Some(cwd) = project_cwd.as_ref() {
+        let project_skills = cwd.join(".claude").join("skills");
+        if project_skills.exists() {
+            if let Ok(entries) = std::fs::read_dir(&project_skills) {
+                for entry in entries.flatten() {
+                    let skill_path = entry.path();
+                    if skill_path.is_dir() {
+                        let skill_md = skill_path.join("SKILL.md");
+                        if skill_md.exists() {
+                            if let Some(mut cmd) = parse_skill_md(&skill_md, &skill_path) {
+                                cmd.source = "project".to_string();
+                                commands.push(cmd);
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // Scan user-level skills (~/.claude/skills/)
@@ -2906,20 +2929,17 @@ fn list_slash_commands() -> Result<Vec<SlashCommand>, String> {
         }
     }
 
-    // Scan project-level skills (.claude/skills/)
-    if let Ok(cwd) = std::env::current_dir() {
-        let project_skills = cwd.join(".claude").join("skills");
-        if project_skills.exists() {
-            if let Ok(entries) = std::fs::read_dir(&project_skills) {
+    // Scan project-level .claude/commands/
+    if let Some(cwd) = project_cwd.as_ref() {
+        let project_cmds = cwd.join(".claude").join("commands");
+        if project_cmds.exists() {
+            if let Ok(entries) = std::fs::read_dir(&project_cmds) {
                 for entry in entries.flatten() {
-                    let skill_path = entry.path();
-                    if skill_path.is_dir() {
-                        let skill_md = skill_path.join("SKILL.md");
-                        if skill_md.exists() {
-                            if let Some(mut cmd) = parse_skill_md(&skill_md, &skill_path) {
-                                cmd.source = "project".to_string();
-                                commands.push(cmd);
-                            }
+                    let path = entry.path();
+                    if path.extension().map(|e| e == "md").unwrap_or(false) {
+                        if let Some(mut cmd) = parse_command_md(&path) {
+                            cmd.source = "project".to_string();
+                            commands.push(cmd);
                         }
                     }
                 }
@@ -2937,24 +2957,6 @@ fn list_slash_commands() -> Result<Vec<SlashCommand>, String> {
                     if let Some(mut cmd) = parse_command_md(&path) {
                         cmd.source = "user".to_string();
                         commands.push(cmd);
-                    }
-                }
-            }
-        }
-    }
-
-    // Scan project-level .claude/commands/
-    if let Ok(cwd) = std::env::current_dir() {
-        let project_cmds = cwd.join(".claude").join("commands");
-        if project_cmds.exists() {
-            if let Ok(entries) = std::fs::read_dir(&project_cmds) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.extension().map(|e| e == "md").unwrap_or(false) {
-                        if let Some(mut cmd) = parse_command_md(&path) {
-                            cmd.source = "project".to_string();
-                            commands.push(cmd);
-                        }
                     }
                 }
             }
@@ -2980,9 +2982,17 @@ fn list_slash_commands() -> Result<Vec<SlashCommand>, String> {
         }
     }
 
-    // Deduplicate by name (keep first occurrence — builtins first, then cache, then marketplace)
+    // Scan plugins cache (installed versions) after project/user/T64 entries so
+    // local commands and skills win duplicate names.
+    let cache_dir = claude_dir.join("plugins").join("cache");
+    if cache_dir.exists() {
+        scan_dir(&cache_dir, &mut commands);
+    }
+
+    // Deduplicate by name while preserving source precedence, then sort for display.
+    let mut seen_command_names = std::collections::HashSet::new();
+    commands.retain(|command| seen_command_names.insert(command.name.clone()));
     commands.sort_by(|a, b| a.name.cmp(&b.name));
-    commands.dedup_by(|a, b| a.name == b.name);
 
     Ok(commands)
 }
@@ -4328,6 +4338,12 @@ fn create_skill_folder(skill_id: String) -> Result<String, String> {
         let meta_json = serde_json::to_string_pretty(&meta)
             .map_err(|e| format!("serialize skill meta: {}", e))?;
         std::fs::write(&meta_path, meta_json).map_err(|e| format!("write: {}", e))?;
+    }
+    if let Err(err) = ensure_skills_plugin() {
+        safe_eprintln!(
+            "[skills] Failed to refresh provider skill links after create: {}",
+            err
+        );
     }
     Ok(dir.to_string_lossy().to_string())
 }

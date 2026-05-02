@@ -16,7 +16,7 @@ import { FONT_OPTIONS, fontStack } from "../../lib/fonts";
 import type { ThemeDefinition } from "../../lib/types";
 import { useCanvasStore } from "../../stores/canvasStore";
 import {
-  PROVIDER_SESSIONS_STORAGE_KEY,
+  readProviderSessionMetadataSnapshot,
   useProviderSessionStore,
 } from "../../stores/providerSessionStore";
 import { useVoiceStore } from "../../stores/voiceStore";
@@ -1236,8 +1236,7 @@ export default function SettingsPanel({ isOpen, onClose }: SettingsPanelProps) {
                     // Canvas `t.title` is a stale snapshot; read the live name from the session store.
                     let savedSessions: Record<string, { name?: string; cwd?: string }> = {};
                     try {
-                      const raw = localStorage.getItem(PROVIDER_SESSIONS_STORAGE_KEY);
-                      if (raw) savedSessions = JSON.parse(raw);
+                      savedSessions = readProviderSessionMetadataSnapshot();
                     } catch (err) {
                       console.warn("[discord] Failed to read session store:", err);
                     }

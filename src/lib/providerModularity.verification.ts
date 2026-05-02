@@ -105,6 +105,8 @@ import {
   resolveSessionProviderState,
   resolveProviderRuntimeResumeId,
   resolveProviderSessionMetadata,
+  PROVIDER_SESSION_META_INDEX_KEY,
+  PROVIDER_SESSION_META_ROW_PREFIX,
   STORAGE_KEY,
   flushSave,
   useProviderSessionStore,
@@ -191,6 +193,43 @@ function assertEqual<T>(actual: T, expected: T, message: string): void {
 function assertNoUndefinedOwnValues(value: Record<string, unknown>, label: string): void {
   for (const [key, entry] of Object.entries(value)) {
     assert(entry !== undefined, `${label}.${key} should be omitted instead of set to undefined`);
+  }
+}
+
+function providerMetaRowKey(sessionId: string): string {
+  return `${PROVIDER_SESSION_META_ROW_PREFIX}${sessionId}`;
+}
+
+function clearProviderMetaRowsForFixture(): void {
+  const keys: string[] = [];
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(PROVIDER_SESSION_META_ROW_PREFIX) || key === PROVIDER_SESSION_META_INDEX_KEY) {
+      keys.push(key);
+    }
+  }
+  for (const key of keys) {
+    localStorage.removeItem(key);
+  }
+}
+
+function snapshotProviderMetaRowsForFixture(): Record<string, string> {
+  const snapshot: Record<string, string> = {};
+  for (let i = 0; i < localStorage.length; i += 1) {
+    const key = localStorage.key(i);
+    if (!key?.startsWith(PROVIDER_SESSION_META_ROW_PREFIX) && key !== PROVIDER_SESSION_META_INDEX_KEY) {
+      continue;
+    }
+    const value = localStorage.getItem(key);
+    if (value !== null) snapshot[key] = value;
+  }
+  return snapshot;
+}
+
+function restoreProviderMetaRowsForFixture(snapshot: Record<string, string>): void {
+  clearProviderMetaRowsForFixture();
+  for (const [key, value] of Object.entries(snapshot)) {
+    localStorage.setItem(key, value);
   }
 }
 
@@ -479,10 +518,15 @@ export function verifyProviderStateMigrationFixture(): VerificationResult {
   const cursorSessionId = "provider-verification-cursor-local";
   const recoveredOpenAiSessionId = "provider-verification-recovered-openai";
   const recoveredCursorSessionId = "provider-verification-recovered-cursor";
+  const freshOpenAiFallbackSessionId = "provider-verification-fresh-openai-fallback";
+  const futureSchemaSessionId = "provider-verification-future-schema";
+  const currentAfterFutureSchemaId = "provider-verification-current-after-future";
   const previousStorage = localStorage.getItem(STORAGE_KEY);
+  const previousRowStorage = snapshotProviderMetaRowsForFixture();
   const previousSessions = useProviderSessionStore.getState().sessions;
 
   try {
+    clearProviderMetaRowsForFixture();
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       [sessionId]: {
         sessionId,
@@ -624,6 +668,52 @@ export function verifyProviderStateMigrationFixture(): VerificationResult {
         provider: "anthropic",
         localTranscript: transcriptFixture.slice(0, 2),
       },
+      [freshOpenAiFallbackSessionId]: {
+        sessionId: freshOpenAiFallbackSessionId,
+        name: "Fresh Codex Fallback",
+        cwd: "",
+        draftPrompt: "",
+        lastSeenAt: 6,
+        schemaVersion: 6,
+        providerState: {
+          provider: "openai",
+          providerLocked: true,
+          selectedModel: "gpt-5.5",
+          selectedEffort: "medium",
+          seedTranscript: null,
+          runtimeMetadata: {
+            openai: {
+              historySource: "codex-rollout",
+              resume: { id: null },
+              runtimePayload: {
+                localTranscript: transcriptFixture.slice(0, 2),
+              },
+            },
+          },
+          providerMetadata: {},
+          providerPermissions: {
+            openai: "workspace",
+          },
+          selectedControls: {
+            openai: {
+              model: "gpt-5.5",
+              effort: "medium",
+              sandbox: "workspace",
+            },
+          },
+        },
+        provider: "openai",
+      },
+      [futureSchemaSessionId]: {
+        sessionId: futureSchemaSessionId,
+        name: "Future Schema",
+        cwd: "",
+        draftPrompt: "",
+        lastSeenAt: 7,
+        schemaVersion: 999,
+        provider: "anthropic",
+        futureOnlyField: "preserve-me",
+      },
     }));
     useProviderSessionStore.setState({ sessions: {} });
     useProviderSessionStore.getState().createSession(sessionId);
@@ -631,11 +721,42 @@ export function verifyProviderStateMigrationFixture(): VerificationResult {
     useProviderSessionStore.getState().createSession(cursorSessionId, undefined, false, undefined, undefined, "anthropic", false);
     useProviderSessionStore.getState().createSession(recoveredOpenAiSessionId);
     useProviderSessionStore.getState().createSession(recoveredCursorSessionId);
+    useProviderSessionStore.getState().createSession(freshOpenAiFallbackSessionId);
+    useProviderSessionStore.getState().createSession(currentAfterFutureSchemaId, "Current After Future", false, undefined, undefined, "openai", false);
+    const immediateSavedAfterCreate = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Record<string, {
+      name?: string;
+      provider?: ProviderId;
+    }>;
+    assertEqual(
+      immediateSavedAfterCreate[currentAfterFutureSchemaId]?.name,
+      "Current After Future",
+      "explicit named provider sessions save synchronously on create",
+    );
+    assertEqual(
+      immediateSavedAfterCreate[currentAfterFutureSchemaId]?.provider,
+      "openai",
+      "explicit provider sessions persist selected provider immediately",
+    );
+    const immediateSavedRowAfterCreate = JSON.parse(localStorage.getItem(providerMetaRowKey(currentAfterFutureSchemaId)) || "{}") as {
+      name?: string;
+      provider?: ProviderId;
+    };
+    assertEqual(
+      immediateSavedRowAfterCreate.name,
+      "Current After Future",
+      "explicit named provider sessions write a row-level metadata upsert",
+    );
+    assertEqual(
+      immediateSavedRowAfterCreate.provider,
+      "openai",
+      "explicit provider sessions persist selected provider in row-level metadata",
+    );
     const migrated = useProviderSessionStore.getState().sessions[sessionId];
     const stateBacked = useProviderSessionStore.getState().sessions[stateSessionId];
     const cursorBacked = useProviderSessionStore.getState().sessions[cursorSessionId];
     const recoveredOpenAi = useProviderSessionStore.getState().sessions[recoveredOpenAiSessionId];
     const recoveredCursor = useProviderSessionStore.getState().sessions[recoveredCursorSessionId];
+    const freshOpenAiFallback = useProviderSessionStore.getState().sessions[freshOpenAiFallbackSessionId];
 
     assert(migrated, "legacy OpenAI metadata creates a session");
     assertEqual(migrated.providerState.provider, "openai", "legacy provider migrates into providerState");
@@ -683,6 +804,21 @@ export function verifyProviderStateMigrationFixture(): VerificationResult {
     assertEqual(recoveredCursor.providerState.provider, "cursor", "Cursor local transcript/control metadata recovers provider after bad Anthropic refresh save");
     assertEqual(recoveredCursor.providerState.selectedControls.cursor?.mode, "ask", "recovered Cursor keeps provider-owned mode control");
 
+    assert(freshOpenAiFallback, "fresh OpenAI local fallback metadata creates a session");
+    assertEqual(freshOpenAiFallback.providerState.provider, "openai", "fresh OpenAI fallback keeps provider");
+    assertEqual(freshOpenAiFallback.messages.length, 2, "fresh OpenAI fallback transcript hydrates into visible messages");
+    assertEqual(freshOpenAiFallback.providerState.seedTranscript?.length, 2, "fresh OpenAI fallback seeds next fresh thread");
+    assertEqual(freshOpenAiFallback.hasBeenStarted, true, "fresh OpenAI fallback opens as a started conversation");
+
+    flushSave();
+    const savedAfterFutureSchema = JSON.parse(localStorage.getItem(STORAGE_KEY) || "{}") as Record<string, {
+      schemaVersion?: number;
+      futureOnlyField?: string;
+    }>;
+    assert(savedAfterFutureSchema[currentAfterFutureSchemaId], "new current-schema sessions still save when a future-schema row exists");
+    assertEqual(savedAfterFutureSchema[futureSchemaSessionId]?.schemaVersion, 999, "future-schema row stays preserved");
+    assertEqual(savedAfterFutureSchema[futureSchemaSessionId]?.futureOnlyField, "preserve-me", "future-schema row unknown fields survive save");
+
     useProviderSessionStore.getState().addUserMessage(cursorSessionId, "persist this");
     useProviderSessionStore.getState().finalizeAssistantMessage(cursorSessionId, "persisted");
     flushSave();
@@ -692,7 +828,7 @@ export function verifyProviderStateMigrationFixture(): VerificationResult {
       providerPermissions?: Record<string, string | null>;
       providerState?: {
         runtimeMetadata?: {
-          openai?: { resume?: { id?: string | null }; runtimePayload?: { codexThreadId?: string | null } };
+          openai?: { resume?: { id?: string | null }; runtimePayload?: { codexThreadId?: string | null; localTranscript?: ChatMessage[] } };
           cursor?: { resume?: { id?: string | null }; runtimePayload?: { localTranscript?: ChatMessage[] } };
         };
         providerMetadata?: {
@@ -702,10 +838,13 @@ export function verifyProviderStateMigrationFixture(): VerificationResult {
     }>;
     const savedCursorTranscript =
       saved[cursorSessionId]?.providerState?.runtimeMetadata?.cursor?.runtimePayload?.localTranscript ?? [];
+    const savedOpenAiTranscript =
+      saved[sessionId]?.providerState?.runtimeMetadata?.openai?.runtimePayload?.localTranscript ?? [];
     assertEqual(savedCursorTranscript.length, 4, "Cursor transcript writes back to metadata");
     assertEqual(savedCursorTranscript[3]?.content, "persisted", "Cursor assistant message persists locally");
+    assertEqual(savedOpenAiTranscript.length, 2, "OpenAI saves a bounded fallback transcript with provider runtime metadata");
     assertEqual(saved[cursorSessionId]?.localTranscript, undefined, "Cursor save drops legacy flat local transcript");
-    assertEqual(saved[sessionId]?.localTranscript, undefined, "OpenAI transcript stays provider-owned after metadata save");
+    assertEqual(saved[sessionId]?.localTranscript, undefined, "OpenAI save drops legacy flat local transcript");
     assertEqual(saved[stateSessionId]?.localTranscript, undefined, "Provider-state OpenAI transcript stays out of local metadata");
     assertEqual(
       saved[stateSessionId]?.providerState?.runtimeMetadata?.openai?.runtimePayload?.codexThreadId,
@@ -718,6 +857,34 @@ export function verifyProviderStateMigrationFixture(): VerificationResult {
       saved[sessionId]?.providerState?.providerMetadata?.openai?.selectedCodexPermission,
       undefined,
       "OpenAI provider metadata no longer stores permission ids",
+    );
+
+    const originalSetItem = Storage.prototype.setItem;
+    let quotaThrowRemaining = 2;
+    Storage.prototype.setItem = function setItemWithQuotaOnce(this: Storage, key: string, value: string): void {
+      if (key === STORAGE_KEY && quotaThrowRemaining > 0) {
+        quotaThrowRemaining -= 1;
+        throw new DOMException("quota fixture", "QuotaExceededError");
+      }
+      originalSetItem.call(this, key, value);
+    };
+    try {
+      useProviderSessionStore.getState().addUserMessage(sessionId, "quota compact save keeps Codex fallback");
+    } finally {
+      Storage.prototype.setItem = originalSetItem;
+    }
+    const compactSaved = JSON.parse(localStorage.getItem(providerMetaRowKey(sessionId)) || "{}") as {
+      providerState?: {
+        runtimeMetadata?: {
+          openai?: { runtimePayload?: { localTranscript?: ChatMessage[] } };
+        };
+      };
+    };
+    const compactOpenAiTranscript =
+      compactSaved.providerState?.runtimeMetadata?.openai?.runtimePayload?.localTranscript ?? [];
+    assert(
+      compactOpenAiTranscript.some((message) => message.content === "quota compact save keeps Codex fallback"),
+      "row-level metadata preserves active OpenAI local transcript when the legacy aggregate write fails",
     );
 
     const hotReloadFallback = resolveSessionProviderState({
@@ -744,6 +911,7 @@ export function verifyProviderStateMigrationFixture(): VerificationResult {
     } else {
       localStorage.setItem(STORAGE_KEY, previousStorage);
     }
+    restoreProviderMetaRowsForFixture(previousRowStorage);
   }
 }
 
@@ -751,10 +919,26 @@ export function verifyProviderPickerLockFixtures(): VerificationResult {
   assert(typeof localStorage !== "undefined", "provider picker fixture requires browser localStorage");
 
   const previousStorage = localStorage.getItem(STORAGE_KEY);
+  const previousRowStorage = snapshotProviderMetaRowsForFixture();
   const previousSessions = useProviderSessionStore.getState().sessions;
   const store = useProviderSessionStore.getState();
 
   try {
+    clearProviderMetaRowsForFixture();
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      "picker-cache-prime": {
+        sessionId: "picker-cache-prime",
+        name: "Cache Prime",
+        cwd: "",
+        draftPrompt: "",
+        lastSeenAt: 0,
+        schemaVersion: 4,
+        provider: "anthropic",
+      },
+    }));
+    useProviderSessionStore.setState({ sessions: {} });
+    store.createSession("picker-cache-prime");
+
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       "picker-legacy-openai": {
         sessionId: "picker-legacy-openai",
@@ -878,6 +1062,7 @@ export function verifyProviderPickerLockFixtures(): VerificationResult {
     } else {
       localStorage.setItem(STORAGE_KEY, previousStorage);
     }
+    restoreProviderMetaRowsForFixture(previousRowStorage);
   }
 }
 
@@ -1631,11 +1816,13 @@ export function verifyProviderAvailabilityFixtures(): VerificationResult {
   assert(typeof localStorage !== "undefined", "provider availability fixture requires browser localStorage");
 
   const previousStorage = localStorage.getItem(STORAGE_KEY);
+  const previousRowStorage = snapshotProviderMetaRowsForFixture();
   const previousSessions = useProviderSessionStore.getState().sessions;
   const previousAvailability = useSettingsStore.getState().providerAvailability;
   const store = useProviderSessionStore.getState();
 
   try {
+    clearProviderMetaRowsForFixture();
     const openAiDisabled = {
       ...previousAvailability,
       anthropic: true,
@@ -1686,6 +1873,7 @@ export function verifyProviderAvailabilityFixtures(): VerificationResult {
     } else {
       localStorage.setItem(STORAGE_KEY, previousStorage);
     }
+    restoreProviderMetaRowsForFixture(previousRowStorage);
   }
 }
 
@@ -1833,6 +2021,18 @@ export function verifyProviderEventNormalizationFixtures(): VerificationResult {
   }));
   assertEqual(cursorRuntimeTurn[0]?.kind, "assistant_message", "Cursor canonical turn result still backfills assistant text when no content streamed");
   assertEqual(cursorRuntimeTurn[1]?.kind, "turn_completed", "Cursor canonical turn result still completes the turn");
+
+  const sanitizedHistoryMessages = mapHistoryMessages([{
+    id: "history-user-reminder",
+    role: "user",
+    content: "<system-reminder>\nInjected skill text\n</system-reminder>\n\nvisible prompt",
+    timestamp: 0,
+  }]);
+  assertEqual(
+    sanitizedHistoryMessages[0]?.content,
+    "visible prompt",
+    "history user messages strip injected system-reminder blocks from visible chat",
+  );
 
   const historyMessages = mapHistoryMessages([{
     id: "history-message",

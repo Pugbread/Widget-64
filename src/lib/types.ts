@@ -198,6 +198,7 @@ export interface SlashCommand {
   description: string;
   source: string;
   usage?: string;
+  kind?: "builtin" | "command" | "skill";
 }
 
 export interface DirEntry {

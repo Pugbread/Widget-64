@@ -3612,6 +3612,121 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-01T21:14:24Z"
+    },
+    {
+      "id": "bug-190",
+      "timestamp": "2026-05-01T21:58:42Z",
+      "error_message": "Terminal 64 skills only work when the user manually types a /skill command; normal Claude/Codex/Cursor prompts do not expose usable skill instructions.",
+      "file": "src/components/provider-chat/ProviderChat.tsx",
+      "root_cause": "ProviderChat only resolved SKILL.md for explicit slash commands, list_slash_commands looked for project skills using the Tauri process cwd instead of the session cwd, and new Terminal 64 skill folders were not immediately relinked into provider skill locations.",
+      "fix": "Normal provider prompts now include a bounded Terminal 64 skill reminder/catalog plus top lexical skill matches with resolved SKILL.md bodies; slash command discovery accepts the active chat cwd; SlashCommand includes a kind field so commands are not mistaken for skills; skill creation refreshes provider skill links.",
+      "tags": [
+        "skills",
+        "providers",
+        "codex",
+        "claude",
+        "cursor",
+        "project-cwd"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-01T21:58:42Z"
+    },
+    {
+      "id": "bug-191",
+      "timestamp": "2026-05-01T22:02:10Z",
+      "error_message": "TypeScript exactOptionalPropertyTypes rejected buildSkillAugmentedPrompt callers that passed cwd: string | undefined.",
+      "file": "src/lib/skillPrompt.ts",
+      "root_cause": "The new helper declared cwd?: string, which allows omission but not an explicit undefined value when exactOptionalPropertyTypes is enabled.",
+      "fix": "Declared the helper parameter as cwd?: string | undefined so ProviderChat can forward effectiveCwd || undefined without widening the call site.",
+      "tags": [
+        "typescript",
+        "exactOptionalPropertyTypes",
+        "skills",
+        "typecheck"
+      ],
+      "related_bugs": [
+        "bug-190"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-01T22:02:10Z"
+    },
+    {
+      "id": "bug-192",
+      "timestamp": "2026-05-01T23:29:53Z",
+      "error_message": "New Codex sessions reload with an empty chat after quitting/reopening the app, while older Codex chats still persist.",
+      "file": "src/stores/providerSessionStore.ts",
+      "root_cause": "Codex was treated as provider-history-only once a thread id existed, so Terminal 64 initially stopped saving any local transcript. The later fallback still failed in production because the localStorage quota/compact retry passed dropSeedTranscripts=true and deleted runtimePayload.localTranscript, a global newer-schema downgrade lock could make all subsequent new-session saves no-op while old rows stayed visible, and brand-new named/provider-selected sessions still relied on debounced creation persistence before the first message. A restart could beat that debounce, causing the canvas panel to restore without a provider metadata row, so it reopened as unnamed/default-provider picker state. A related same-renderer edge case let readPersistedMeta return stale cached rows after direct localStorage replacement. If localStorage was already under quota pressure, both the full and compact saves could still fail because old/inactive metadata was kept, leaving no row for the new session.",
+      "fix": "Persist a bounded OpenAI/Codex local transcript inside provider runtime metadata as a UI fallback, save transcript-bearing Codex/Cursor message mutations synchronously instead of waiting for idle debounce, preserve a smaller bounded OpenAI/Cursor local transcript during compact quota retries, fall back to active-session-only metadata and finally active metadata without local transcripts if quota pressure persists, change newer-schema handling to preserve only those rows instead of freezing all saves, save explicit named/provider session creation synchronously, lock the provider when the new-session dialog explicitly creates a Codex/OpenAI session, let blank existing rows adopt an explicit provider before first send, make readPersistedMeta compare the actual storage string before reusing the in-memory cache, hydrate fallback messages on reload, keep hasBeenStarted aligned with restored user turns, defer live Codex resume-id auto-hydration while streaming, and seed the next fresh Codex thread when a saved thread id points to a missing rollout.",
+      "tags": [
+        "codex",
+        "session-persistence",
+        "local-transcript",
+        "rollout",
+        "reload"
+      ],
+      "related_bugs": [
+        "bug-178"
+      ],
+      "occurrences": 4,
+      "last_seen": "2026-05-02T01:16:13Z"
+    },
+    {
+      "id": "bug-193",
+      "timestamp": "2026-05-02T01:51:27Z",
+      "error_message": "New Codex/OpenAI sessions still reload as unnamed/unselected-provider sessions after production restart even after aggregate localStorage guards.",
+      "file": "src/stores/providerSessionStore.ts",
+      "root_cause": "Terminal 64 still made the legacy single localStorage aggregate blob the practical persistence boundary for session names/provider locks in several read paths. That blob can be stale, oversized, quota-failing, or missing while the canvas panel survives, so ProviderChat recreates the same id as a blank unlocked default-provider session. t3code avoids this class by persisting provider/session runtime as row-level durable records keyed by thread/session id.",
+      "fix": "Added row-level provider session metadata keys plus an index, writes each active session row before the legacy aggregate, treats the aggregate as compatibility-only, removes it when it blocks quota, merges row data on reads, routes App/Settings/session-browser metadata reads through the store snapshot helpers, and passes the saved canvas title into ProviderChat as a fallback name for pre-patch broken panels.",
+      "tags": [
+        "codex",
+        "session-persistence",
+        "localStorage",
+        "row-store",
+        "t3code"
+      ],
+      "related_bugs": [
+        "bug-192"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-02T01:51:27Z"
+    },
+    {
+      "id": "bug-194",
+      "timestamp": "2026-05-02T02:47:52Z",
+      "error_message": "Injected <system-reminder>...</system-reminder> skill blocks appear in visible chat/history after sending prompts.",
+      "file": "src/lib/tauriApi.ts",
+      "root_cause": "Live sends displayed the clean user prompt, but provider-owned history hydration can later return the full augmented provider prompt containing Terminal 64 skill reminders. The history/store boundary did not strip prompt-only injected blocks before rendering or persisting local transcript fallbacks.",
+      "fix": "Added prompt sanitization for system-reminder blocks, applied it to provider history mapping, user-message store insertion, local transcript hydration, and disk hydrate/replace/merge paths, with a regression fixture proving history user messages render only the visible prompt.",
+      "tags": [
+        "skills",
+        "system-reminder",
+        "history-hydration",
+        "chat-display"
+      ],
+      "related_bugs": [
+        "bug-190"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-02T02:47:52Z"
+    },
+    {
+      "id": "bug-195",
+      "timestamp": "2026-05-02T04:48:29Z",
+      "error_message": "Codex provider sessions cannot find luau-lsp/linter even though it is installed and available in the user's shell.",
+      "file": "src-tauri/src/providers/util.rs",
+      "root_cause": "Provider subprocesses inherit Terminal 64's GUI/Tauri environment, not the user's interactive shell PATH. The shared expanded provider PATH restored Homebrew, local, Cargo, and npm bins but omitted common Roblox toolchain shims such as ~/.aftman/bin, ~/.rokit/bin, and ~/.foreman/bin.",
+      "fix": "Added Aftman, Rokit, Foreman, and Wally bin directories to the shared expanded_tool_path on macOS/Linux and Windows, so Codex/Claude/Cursor/OpenWolf spawned tools can resolve Roblox linters and CLIs installed by those managers.",
+      "tags": [
+        "codex",
+        "path",
+        "luau-lsp",
+        "roblox",
+        "provider-env"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-02T04:48:29Z"
     }
   ]
 }

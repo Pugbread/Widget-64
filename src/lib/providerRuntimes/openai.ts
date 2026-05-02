@@ -22,7 +22,11 @@ import type {
 } from "../../contracts/providerRuntime";
 import { getProviderTurnResumeId } from "../../contracts/providerRuntime";
 import { decodeCodexPermission } from "../providers";
-import { getOpenAiThreadIdForSession, setOpenAiThreadIdForSession } from "./openaiSessionMetadata";
+import {
+  clearOpenAiThreadIdAndSeedTranscript,
+  getOpenAiThreadIdForSession,
+  setOpenAiThreadIdForSession,
+} from "./openaiSessionMetadata";
 
 function stringControlValue(value: unknown): string | null {
   return typeof value === "string" ? value : null;
@@ -375,7 +379,7 @@ export const openaiRuntime: ProviderRuntime<"openai"> = {
       });
       if (result.status === "skipped" || result.status === "unsupported") {
         if (result.reason === "codex_rollout_missing") {
-          setOpenAiThreadIdForSession(input.sessionId, null);
+          clearOpenAiThreadIdAndSeedTranscript(input.sessionId);
         }
         return {
           status: result.status,

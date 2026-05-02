@@ -38,6 +38,7 @@ import {
   parseDelegateCommand,
   parseDelegationStartFromMessage,
 } from "../../lib/delegationWorkflow";
+import { buildSkillAugmentedPrompt, isSkillSlashCommand } from "../../lib/skillPrompt";
 import { subscribeProviderDelegationRequests } from "../../lib/providerEventSemantics";
 import { rewritePromptStream } from "../../lib/ai";
 import { toolHeader } from "./toolPresentation";
@@ -470,9 +471,10 @@ export interface ProviderChatProps {
   cwd: string;
   skipPermissions: boolean;
   isActive: boolean;
+  initialName?: string | undefined;
 }
 
-export function ProviderChat({ sessionId, cwd, skipPermissions, isActive }: ProviderChatProps) {
+export function ProviderChat({ sessionId, cwd, skipPermissions, isActive, initialName }: ProviderChatProps) {
   // Shallow-compare selector that EXCLUDES streamingText — the streaming
   // bubble has its own fine-grained subscription, so we don't need to
   // re-render the whole ProviderChat tree (ChatInput, toolbar, Virtuoso props)
@@ -641,11 +643,11 @@ export function ProviderChat({ sessionId, cwd, skipPermissions, isActive }: Prov
     // Passing cwd to createSession lets the store kick off JSONL hydration
     // immediately instead of waiting for a later setCwd call.
     const effectiveInitCwd = cwd && cwd !== "." ? cwd : undefined;
-    createSession(sessionId, undefined, false, undefined, effectiveInitCwd, defaultAvailableProvider, false);
+    createSession(sessionId, initialName, false, undefined, effectiveInitCwd, defaultAvailableProvider, false);
     if (effectiveInitCwd) {
       useProviderSessionStore.getState().setCwd(sessionId, effectiveInitCwd);
     }
-  }, [sessionId, createSession, cwd, defaultAvailableProvider]);
+  }, [sessionId, createSession, cwd, defaultAvailableProvider, initialName]);
 
   useEffect(() => {
     if (!session || !canPickProviderBeforeStart(session, hasStreamingText)) return;
@@ -690,9 +692,9 @@ export function ProviderChat({ sessionId, cwd, skipPermissions, isActive }: Prov
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProvider, sessionId]);
   const t64Commands = useRef<SlashCommand[]>([
-    { name: "loop", description: "Run a prompt on a loop (e.g. /loop 5m improve the code)", usage: "/loop [interval] <prompt> — default 10m. /loop stop to cancel.", source: "Terminal 64" },
-    { name: "delegate", description: "Split work into parallel sub-sessions", usage: "/delegate <prompt> — Plans the task split, spawns agents with MCP team chat.", source: "Terminal 64" },
-    { name: "reload-plugins", description: "Reload slash commands, skills, and MCP servers", usage: "/reload-plugins — re-fetches all available commands and MCP configs.", source: "Terminal 64" },
+    { name: "loop", description: "Run a prompt on a loop (e.g. /loop 5m improve the code)", usage: "/loop [interval] <prompt> — default 10m. /loop stop to cancel.", source: "Terminal 64", kind: "command" },
+    { name: "delegate", description: "Split work into parallel sub-sessions", usage: "/delegate <prompt> — Plans the task split, spawns agents with MCP team chat.", source: "Terminal 64", kind: "command" },
+    { name: "reload-plugins", description: "Reload slash commands, skills, and MCP servers", usage: "/reload-plugins — re-fetches all available commands and MCP configs.", source: "Terminal 64", kind: "command" },
   ]);
   const reloadCommands = useCallback(() => {
     const addClaudeBuiltins = providerSupports(selectedProvider, "nativeSlashCommands");
@@ -709,13 +711,13 @@ export function ProviderChat({ sessionId, cwd, skipPermissions, isActive }: Prov
       }
       setSlashCommands(merged);
     };
-    listSlashCommands().then(applyCommands).catch(() => applyCommands([]));
+    listSlashCommands(effectiveCwd || undefined).then(applyCommands).catch(() => applyCommands([]));
     if (providerSupports(selectedProvider, "mcp")) {
       listMcpServers(cwd).then(setConfigMcpServers).catch(() => {});
     } else {
       setConfigMcpServers([]);
     }
-  }, [cwd, selectedProvider]);
+  }, [cwd, effectiveCwd, selectedProvider]);
   useEffect(() => { reloadCommands(); }, [reloadCommands]);
   // Apply persisted font on mount (once per app, harmless if called multiple times)
   useEffect(() => {
@@ -1029,13 +1031,9 @@ export function ProviderChat({ sessionId, cwd, skipPermissions, isActive }: Prov
       if (skillMatch) {
         const cmdName = skillMatch[1]!;
         const cmdArgs = (skillMatch[2] || "").trim();
-        // Skills have source: "user", "project", "Terminal 64", or plugin-related.
-        // Built-in commands have source: "built-in" or are in the T64 commands list.
         const t64Builtins = new Set(t64Commands.current.map((c) => c.name));
-        const skillSources = new Set(["user", "project", "Terminal 64"]);
         const matchedSkill = slashCommands.find(
-          (c) => c.name === cmdName && !t64Builtins.has(c.name) &&
-            (skillSources.has(c.source) || (c.source !== "built-in" && c.source !== "builtin"))
+          (c) => c.name === cmdName && isSkillSlashCommand(c, t64Builtins)
         );
         if (matchedSkill) {
           try {
@@ -1085,13 +1083,23 @@ export function ProviderChat({ sessionId, cwd, skipPermissions, isActive }: Prov
       const consumed = consumeAttachments(prompt, displayPrompt);
       prompt = consumed.prompt;
       displayPrompt = consumed.displayPrompt;
+      const t64Builtins = new Set(t64Commands.current.map((c) => c.name));
+      const shouldAugmentWithSkills = !text.trimStart().startsWith("/") || !!codexPlan;
+      const providerPrompt = shouldAugmentWithSkills
+        ? await buildSkillAugmentedPrompt({
+            prompt,
+            cwd: effectiveCwd || undefined,
+            slashCommands,
+            builtinNames: t64Builtins,
+          })
+        : prompt;
 
       const isCurrentlyStreaming = useProviderSessionStore.getState().sessions[sessionId]?.isStreaming;
       if (isCurrentlyStreaming) {
         // Queue the prompt instead of sending mid-thinking
         const queuedPrompt: QueuedPromptInput = {
           displayText: displayPrompt,
-          providerPrompt: prompt,
+          providerPrompt,
           command: queuedCommandMetadataForText(text, supportsCompact, !!codexPlan),
           ...(permissionOverride !== undefined ? { permissionOverride } : {}),
           ...(codexCollaborationMode !== undefined ? { codexCollaborationMode } : {}),
@@ -1108,7 +1116,7 @@ export function ProviderChat({ sessionId, cwd, skipPermissions, isActive }: Prov
 
       addUserMessage(sessionId, displayPrompt);
       if (!fromDiscord) emit("gui-message", { session_id: sessionId, content: displayPrompt }).catch(() => {});
-      await actualSend(prompt, permissionOverride, codexCollaborationMode ? { codexCollaborationMode } : undefined);
+      await actualSend(providerPrompt, permissionOverride, codexCollaborationMode ? { codexCollaborationMode } : undefined);
     },
     [sessionId, consumeAttachments, addUserMessage, actualSend, reloadCommands, slashCommands, effectiveCwd, planFinished, planContent, resetPlan, selectedProvider, supportsCompact]
   );
