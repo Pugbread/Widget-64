@@ -1,7 +1,7 @@
 # anatomy.md
 
-> Auto-maintained by OpenWolf. Last scanned: 2026-05-02T04:00:00.537Z
-> Files: 524 tracked | Anatomy hits: 0 | Misses: 0
+> Auto-maintained by OpenWolf. Last scanned: 2026-05-03T16:00:00.946Z
+> Files: 527 tracked | Anatomy hits: 0 | Misses: 0
 
 ## ./
 
@@ -21,6 +21,9 @@
 - `terminal64-delegation-2026-04-30T03-56-06-151Z-9f72d378.md` — Terminal 64 Delegation Team Chat (~4472 tok)
 - `terminal64-delegation-2026-05-01T23-59-24-273Z-21ee1c11.md` — Terminal 64 Delegation Team Chat (~5266 tok)
 - `terminal64-delegation-2026-05-02T00-25-51-345Z-a63a67ec.md` — Terminal 64 Delegation Team Chat (~2951 tok)
+- `terminal64-delegation-2026-05-03T14-21-12-212Z-16d8448e.md` — Terminal 64 Delegation Team Chat (~1765 tok)
+- `terminal64-delegation-2026-05-03T14-23-20-008Z-2fbd4d3f.md` — Terminal 64 Delegation Team Chat (~292 tok)
+- `terminal64-delegation-2026-05-03T14-25-07-918Z-c7248668.md` — Terminal 64 Delegation Team Chat (~2445 tok)
 - `tsconfig.json` — TypeScript configuration (~216 tok)
 - `tsconfig.node.json` (~67 tok)
 - `vite.config.ts` — Vite build configuration (~140 tok)
@@ -37,6 +40,10 @@
 ## .codex/
 
 - `config.toml` (~93 tok)
+
+## .cursor/
+
+- `mcp.json` (~76 tok)
 
 ## .github/
 
@@ -759,4 +766,3 @@
 
 - `__init__.py` (~34 tok)
 - `_build_config.py` — _build_config.py.in is converted into _build_config.py during the meson build process. (~569 tok)
-- `bokeh_renderer.py` — BokehRenderer: filled, grid, lines, mask + 5 more (~3954 tok)

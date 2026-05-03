@@ -92,6 +92,52 @@ fn validate_shell_command(command: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn launch_external_url(url: &str) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("open external url: {e}"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        std::process::Command::new("rundll32.exe")
+            .arg("url.dll,FileProtocolHandler")
+            .arg(url)
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("open external url: {e}"))
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(url)
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("open external url: {e}"))
+    }
+}
+
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    if url.len() > 8192 {
+        return Err("URL is too long".to_string());
+    }
+
+    let parsed = url::Url::parse(&url).map_err(|_| "Invalid URL".to_string())?;
+    match parsed.scheme() {
+        "http" | "https" | "mailto" => launch_external_url(parsed.as_str()),
+        _ => Err("Unsupported URL scheme".to_string()),
+    }
+}
+
 use browser_manager::BrowserManager;
 use discord_bot::DiscordBot;
 use mic_manager::MicManager;
@@ -6127,6 +6173,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            open_external_url,
             shell_exec,
             create_terminal,
             write_terminal,

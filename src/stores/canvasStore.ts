@@ -87,6 +87,7 @@ interface CanvasState {
   zoom: number;
   nextZ: number;
   activeTerminalId: string | null;
+  focusedTerminalId: string | null;
   snapGuides: SnapGuide[];
 
   addTerminal: (x?: number, y?: number, cwd?: string, width?: number, height?: number, title?: string) => CanvasTerminal;
@@ -106,6 +107,8 @@ interface CanvasState {
   popOut: (id: string) => void;
   popIn: (terminalId: string) => void;
   setActive: (id: string) => void;
+  toggleFocusedTerminal: (terminalId: string) => void;
+  clearFocusedTerminal: () => void;
   setSnapGuides: (guides: SnapGuide[]) => void;
   clearSnapGuides: () => void;
   pan: (dx: number, dy: number) => void;
@@ -198,6 +201,7 @@ function getInitialState() {
           zoom: session.zoom ?? 1,
           nextZ: terminals.length + 1,
           activeTerminalId: terminals[0]?.terminalId ?? null,
+          focusedTerminalId: null,
           snapGuides: [],
         };
       }
@@ -214,6 +218,7 @@ function getInitialState() {
     zoom: 1,
     nextZ: 2,
     activeTerminalId: def.terminalId,
+    focusedTerminalId: null,
     snapGuides: [],
   };
 }
@@ -373,6 +378,10 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
             removed?.terminalId === s.activeTerminalId
               ? newTerminals[newTerminals.length - 1]?.terminalId ?? null
               : s.activeTerminalId,
+          focusedTerminalId:
+            removed?.terminalId === s.focusedTerminalId
+              ? null
+              : s.focusedTerminalId,
         };
       });
       markDirty();
@@ -516,6 +525,17 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
 
     setActive: (id: string) => {
       set({ activeTerminalId: id });
+    },
+
+    toggleFocusedTerminal: (terminalId: string) => {
+      set((s) => ({
+        focusedTerminalId: s.focusedTerminalId === terminalId ? null : terminalId,
+        activeTerminalId: terminalId,
+      }));
+    },
+
+    clearFocusedTerminal: () => {
+      set({ focusedTerminalId: null });
     },
 
     setSnapGuides: (guides: SnapGuide[]) => {

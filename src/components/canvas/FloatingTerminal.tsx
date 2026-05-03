@@ -27,9 +27,11 @@ function unblockIframes() {
 
 interface FloatingTerminalProps {
   term: CanvasTerminal;
+  focusActive?: boolean | undefined;
+  focusFrame?: { x: number; y: number; width: number; height: number; scale: number; zIndex: number } | null | undefined;
 }
 
-export default memo(function FloatingTerminal({ term }: FloatingTerminalProps) {
+export default memo(function FloatingTerminal({ term, focusActive = false, focusFrame }: FloatingTerminalProps) {
   // Reactive state — only re-render when these change
   const isActive = useCanvasStore((s) => s.activeTerminalId === term.terminalId);
   // Stable action refs — won't cause re-renders
@@ -202,6 +204,11 @@ export default memo(function FloatingTerminal({ term }: FloatingTerminalProps) {
   );
 
   const handleClose = useCallback(() => {
+    if (termRef.current.terminalId === useCanvasStore.getState().focusedTerminalId) {
+      useCanvasStore.getState().clearFocusedTerminal();
+      return;
+    }
+
     if (term.panelType === "claude") {
       const sess = useProviderSessionStore.getState().sessions[term.terminalId];
       closeProviderSession(term.terminalId, resolveSessionProviderState(sess).provider).catch(() => {});
@@ -258,6 +265,7 @@ export default memo(function FloatingTerminal({ term }: FloatingTerminalProps) {
   const isSharedChat = term.panelType === "shared-chat";
   const isWidget = term.panelType === "widget";
   const isBrowser = term.panelType === "browser";
+  const isFocusedMode = Boolean(focusFrame);
   const { providerSessionName, providerCwd, providerId } = useProviderSessionStore(useShallow((s) => {
     if (!isClaude) return { providerSessionName: undefined, providerCwd: undefined, providerId: undefined };
     const sess = s.sessions[term.terminalId];
@@ -291,13 +299,15 @@ export default memo(function FloatingTerminal({ term }: FloatingTerminalProps) {
 
   return (
     <div
-      className={`floating-terminal ${isWorking ? "floating-terminal--working" : ""} ${isWidget ? "floating-terminal--widget" : ""}`}
+      className={`floating-terminal ${isWorking ? "floating-terminal--working" : ""} ${isWidget ? "floating-terminal--widget" : ""} ${isFocusedMode ? "floating-terminal--focused" : ""} ${focusActive && !isFocusedMode ? "floating-terminal--focus-background" : ""}`}
       style={{
-        left: term.x,
-        top: term.y,
-        width: term.width,
-        height: term.height,
-        zIndex: term.zIndex,
+        left: focusFrame?.x ?? term.x,
+        top: focusFrame?.y ?? term.y,
+        width: focusFrame?.width ?? term.width,
+        height: focusFrame?.height ?? term.height,
+        zIndex: focusFrame?.zIndex ?? term.zIndex,
+        transform: focusFrame ? `scale(${focusFrame.scale}) translateZ(0)` : undefined,
+        transformOrigin: focusFrame ? "0 0" : undefined,
         "--ft-border": term.borderColor,
       } as React.CSSProperties}
       onMouseDown={handleFocus}
@@ -306,7 +316,7 @@ export default memo(function FloatingTerminal({ term }: FloatingTerminalProps) {
       {isWidget && <div className="ft-widget-hover-zone" onMouseEnter={showWidgetBar} onMouseLeave={hideWidgetBar} />}
       <div
         className={`ft-header ${isWidget ? "ft-header--widget" : ""} ${isWidget && widgetBarVisible ? "ft-header--widget-visible" : ""}`}
-        onMouseDown={handleHeaderMouseDown}
+        onMouseDown={isFocusedMode ? undefined : handleHeaderMouseDown}
         onMouseEnter={isWidget ? showWidgetBar : undefined}
         onMouseLeave={isWidget ? hideWidgetBar : undefined}
       >
@@ -445,7 +455,7 @@ export default memo(function FloatingTerminal({ term }: FloatingTerminalProps) {
           </button>
         )}
         {!isSharedChat && (
-          <button className="ft-btn" onClick={handleClose} title="Close">
+          <button className="ft-btn" onClick={handleClose} title={isFocusedMode ? "Exit focus mode" : "Close"}>
             <svg width="9" height="9" viewBox="0 0 9 9">
               <path d="M1 1L8 8M8 1L1 8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
             </svg>
@@ -539,14 +549,18 @@ export default memo(function FloatingTerminal({ term }: FloatingTerminalProps) {
       )}
 
       {/* Resize handles */}
-      <div className="ft-resize ft-resize--n" onMouseDown={(e) => startEdgeResize(e, "n")} />
-      <div className="ft-resize ft-resize--s" onMouseDown={(e) => startEdgeResize(e, "s")} />
-      <div className="ft-resize ft-resize--w" onMouseDown={(e) => startEdgeResize(e, "w")} />
-      <div className="ft-resize ft-resize--e" onMouseDown={(e) => startEdgeResize(e, "e")} />
-      <div className="ft-resize ft-resize--nw" onMouseDown={(e) => startEdgeResize(e, "nw")} />
-      <div className="ft-resize ft-resize--ne" onMouseDown={(e) => startEdgeResize(e, "ne")} />
-      <div className="ft-resize ft-resize--sw" onMouseDown={(e) => startEdgeResize(e, "sw")} />
-      <div className="ft-resize ft-resize--se" onMouseDown={(e) => startEdgeResize(e, "se")} />
+      {!isFocusedMode && (
+        <>
+          <div className="ft-resize ft-resize--n" onMouseDown={(e) => startEdgeResize(e, "n")} />
+          <div className="ft-resize ft-resize--s" onMouseDown={(e) => startEdgeResize(e, "s")} />
+          <div className="ft-resize ft-resize--w" onMouseDown={(e) => startEdgeResize(e, "w")} />
+          <div className="ft-resize ft-resize--e" onMouseDown={(e) => startEdgeResize(e, "e")} />
+          <div className="ft-resize ft-resize--nw" onMouseDown={(e) => startEdgeResize(e, "nw")} />
+          <div className="ft-resize ft-resize--ne" onMouseDown={(e) => startEdgeResize(e, "ne")} />
+          <div className="ft-resize ft-resize--sw" onMouseDown={(e) => startEdgeResize(e, "sw")} />
+          <div className="ft-resize ft-resize--se" onMouseDown={(e) => startEdgeResize(e, "se")} />
+        </>
+      )}
     </div>
   );
 });

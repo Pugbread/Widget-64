@@ -10,6 +10,11 @@ import VoiceLivePanel from "../provider-chat/VoiceLivePanel";
 import VoiceMascot from "../provider-chat/VoiceMascot";
 import "./Canvas.css";
 
+const FOCUS_LAYER_Z = 2_000_000;
+const FOCUS_WIDTH_RATIO = 0.65;
+const FOCUS_TOP_MARGIN = 24;
+const FOCUS_BOTTOM_MARGIN = 92;
+
 /** Safari/WebKit gesture events (non-standard, not in lib.dom.d.ts) */
 interface GestureEvent extends UIEvent {
   scale: number;
@@ -34,9 +39,13 @@ function edgePoint(
 }
 
 export default function Canvas() {
-  const { terminals, snapGuides } = useCanvasStore(useShallow((s) => ({
+  const { terminals, snapGuides, focusedTerminalId, focusPanX, focusPanY, focusZoom } = useCanvasStore(useShallow((s) => ({
     terminals: s.terminals,
     snapGuides: s.snapGuides,
+    focusedTerminalId: s.focusedTerminalId,
+    focusPanX: s.focusedTerminalId ? s.panX : 0,
+    focusPanY: s.focusedTerminalId ? s.panY : 0,
+    focusZoom: s.focusedTerminalId ? s.zoom : 1,
   })));
   // Read zoom for non-transform uses (badge); pan/zoom for transforms are applied via direct DOM writes below
   const zoom = useCanvasStore((s) => s.zoom);
@@ -58,6 +67,18 @@ export default function Canvas() {
   const backgroundOpacity = useSettingsStore((s) => s.backgroundOpacity);
   const showGrid = useSettingsStore((s) => s.showGrid);
   const [bgDataUrl, setBgDataUrl] = useState<string | null>(null);
+  const [viewportSize, setViewportSize] = useState(() => ({
+    width: window.innerWidth,
+    height: window.innerHeight,
+  }));
+
+  useEffect(() => {
+    const handleResize = () => {
+      setViewportSize({ width: window.innerWidth, height: window.innerHeight });
+    };
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
 
   // Load background image as data URL when path changes
   useEffect(() => {
@@ -131,6 +152,33 @@ export default function Canvas() {
     }
     return lines;
   }, [terminals, providerSessionCwds]);
+
+  const focusedTerm = useMemo(() => {
+    if (!focusedTerminalId) return null;
+    return terminals.find((t) => t.terminalId === focusedTerminalId && t.panelType === "claude" && !t.poppedOut) ?? null;
+  }, [focusedTerminalId, terminals]);
+
+  const focusFrame = useMemo(() => {
+    if (!focusedTerm) return null;
+    const targetWidth = Math.max(360, viewportSize.width * FOCUS_WIDTH_RATIO);
+    const targetHeight = Math.max(300, viewportSize.height - FOCUS_TOP_MARGIN - FOCUS_BOTTOM_MARGIN);
+    const targetLeft = (viewportSize.width - targetWidth) / 2;
+
+    return {
+      x: (targetLeft - focusPanX) / focusZoom,
+      y: (FOCUS_TOP_MARGIN - focusPanY) / focusZoom,
+      width: targetWidth,
+      height: targetHeight,
+      scale: 1 / focusZoom,
+      zIndex: FOCUS_LAYER_Z,
+      backdrop: {
+        x: -focusPanX / focusZoom,
+        y: -focusPanY / focusZoom,
+        width: viewportSize.width / focusZoom,
+        height: viewportSize.height / focusZoom,
+      },
+    };
+  }, [focusPanX, focusPanY, focusZoom, focusedTerm, viewportSize]);
 
   // Center view on terminals on first mount
   useEffect(() => {
@@ -277,8 +325,26 @@ export default function Canvas() {
           />
         ))}
 
+        {focusedTerm && focusFrame && (
+          <div
+            className="canvas-focus-backdrop"
+            style={{
+              left: focusFrame.backdrop.x,
+              top: focusFrame.backdrop.y,
+              width: focusFrame.backdrop.width,
+              height: focusFrame.backdrop.height,
+              zIndex: FOCUS_LAYER_Z - 1,
+            }}
+          />
+        )}
+
         {terminals.map((term) => (
-          <FloatingTerminal key={term.id} term={term} />
+          <FloatingTerminal
+            key={term.id}
+            term={term}
+            focusActive={Boolean(focusedTerm)}
+            focusFrame={focusedTerm?.id === term.id ? focusFrame : undefined}
+          />
         ))}
         {snapGuides.map((g, i) => (
           <div

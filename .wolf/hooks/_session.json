@@ -1,11 +1,67 @@
 {
-  "session_id": "session-2026-04-29-1901",
-  "started": "2026-04-29T17:01:32.870Z",
-  "files_read": {},
+  "session_id": "session-2026-05-03-1621",
+  "started": "2026-05-03T14:21:15.399Z",
+  "files_read": {
+    "/Users/janislacars/Documents/Terminal-64/terminal64-delegation-2026-05-03T14-21-12-212Z-16d8448e.md": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:32.892Z"
+    },
+    "src/components/provider-chat/ProviderChat.tsx": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:34.218Z"
+    },
+    "src/components/provider-chat/DelegationBadge.tsx": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:34.305Z"
+    },
+    "src/lib/delegationWorkflow.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:34.309Z"
+    },
+    "src/hooks/useDelegationOrchestrator.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:34.339Z"
+    },
+    "src-tauri/src/permission_server.rs": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:34.341Z"
+    },
+    "src/components/provider-chat/DelegationDialog.tsx": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:34.342Z"
+    },
+    "/Users/janislacars/Documents/Terminal-64/mcp/delegation-common.mjs": {
+      "count": 1,
+      "tokens": 2904,
+      "first_read": "2026-05-03T14:21:35.796Z"
+    },
+    "/Users/janislacars/Documents/Terminal-64/src/lib/delegationChildRuntime.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:40.461Z"
+    },
+    "/Users/janislacars/Documents/Terminal-64/src/lib/tauriApi.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:40.529Z"
+    },
+    "/Users/janislacars/Documents/Terminal-64/src/hooks/useDelegationSpawn.ts": {
+      "count": 1,
+      "tokens": 0,
+      "first_read": "2026-05-03T14:21:52.940Z"
+    }
+  },
   "files_written": [],
   "edit_counts": {},
-  "anatomy_hits": 0,
-  "anatomy_misses": 0,
+  "anatomy_hits": 1,
+  "anatomy_misses": 4,
   "repeated_reads_warned": 0,
   "cerebrum_warnings": 0,
   "stop_count": 0

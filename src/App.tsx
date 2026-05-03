@@ -119,6 +119,7 @@ function App() {
   const [providerSessionDialogOpen, setProviderSessionDialogOpen] = useState(false);
   const [widgetDialogOpen, setWidgetDialogOpen] = useState(false);
   const [skillDialogOpen, setSkillDialogOpen] = useState(false);
+  const focusedTerminalId = useCanvasStore((s) => s.focusedTerminalId);
 
   useTheme();
   useKeybindings();
@@ -163,7 +164,7 @@ function App() {
   }, []);
 
   // Hide all native browser webviews when any overlay is open (they render above DOM)
-  const anyOverlayOpen = settingsOpen || paletteOpen || providerSessionDialogOpen || widgetDialogOpen || skillDialogOpen;
+  const anyOverlayOpen = settingsOpen || paletteOpen || providerSessionDialogOpen || widgetDialogOpen || skillDialogOpen || Boolean(focusedTerminalId);
   useEffect(() => {
     setAllBrowsersVisible(!anyOverlayOpen).catch(() => {});
     setAllWidgetWebviewsVisible(!anyOverlayOpen).catch(() => {});
@@ -354,6 +355,19 @@ function App() {
             useProviderSessionStore.getState().createSession(newest.terminalId, undefined, false, undefined, active.cwd, parentProvider, false);
           }
         }
+      },
+    });
+
+    registerCommand({
+      id: "provider.focusMode.toggle",
+      label: "Toggle Provider Focus Mode",
+      category: "Provider",
+      execute: () => {
+        const canvas = useCanvasStore.getState();
+        const active = canvas.terminals.find(t => t.terminalId === canvas.activeTerminalId);
+        if (active?.panelType !== "claude") return;
+        canvas.bringToFront(active.id);
+        useCanvasStore.getState().toggleFocusedTerminal(active.terminalId);
       },
     });
 

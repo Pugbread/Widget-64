@@ -76,6 +76,10 @@ export const DEFAULT_KEYBINDINGS: Keybinding[] = [
     command: "claude.newSession",
   },
   {
+    combo: { key: "x" },
+    command: "provider.focusMode.toggle",
+  },
+  {
     combo: { key: "v", ctrl: true, shift: true },
     command: "voice.toggle",
   },

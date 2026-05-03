@@ -8,7 +8,7 @@ import {
   getProviderToolFilePath,
   getProviderToolPaths,
 } from "../../contracts/providerEvents";
-import { readFileBase64 } from "../../lib/tauriApi";
+import { openExternalUrl, readFileBase64 } from "../../lib/tauriApi";
 import {
   shortPath,
   toolGroupItem,
@@ -45,6 +45,32 @@ const EXT_TO_MIME: Record<string, string> = {
 // re-fetch the same image's base64 blob (and flash the filename placeholder
 // on every re-enter). Lives for the lifetime of the chat panel.
 const INLINE_IMAGE_CACHE = new Map<string, string>();
+
+function ExternalLink({ href, children }: { href: string; children: React.ReactNode }) {
+  const handleOpen = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    openExternalUrl(href).catch((error) => {
+      console.warn("[chat] Failed to open external URL:", error);
+    });
+  };
+
+  return (
+    <a
+      className="cc-link"
+      href={href}
+      title={href}
+      target="_blank"
+      rel="noreferrer"
+      onClick={handleOpen}
+      onAuxClick={(event) => {
+        if (event.button === 1) handleOpen(event);
+      }}
+    >
+      {children}
+    </a>
+  );
+}
 
 function InlineImage({ filePath }: { filePath: string }) {
   const [src, setSrc] = useState<string | null>(() => INLINE_IMAGE_CACHE.get(filePath) ?? null);
@@ -127,7 +153,7 @@ function renderInline(text: string, keyPrefix: string = ""): React.ReactNode[] {
       const href = match[9].trim();
       const hrefLower = href.toLowerCase().replace(/\s/g, '');
       if (/^https?:|^mailto:/i.test(hrefLower)) {
-        result.push(<a key={key} className="cc-link" href={href} title={href}>{match[8]}</a>);
+        result.push(<ExternalLink key={key} href={href}>{match[8]}</ExternalLink>);
       } else {
         result.push(<span key={key}>{match[8]}</span>);
       }

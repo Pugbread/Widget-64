@@ -6,12 +6,28 @@
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  transition: border-color 0.3s;
+  transition-property: border-color, box-shadow, filter, opacity;
+  transition-duration: 0.22s;
+  transition-timing-function: cubic-bezier(0.2, 0, 0, 1);
   will-change: transform;
   transform: translateZ(0);
   backface-visibility: hidden;
   contain: layout paint;
   isolation: isolate;
+}
+
+.floating-terminal--focused {
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.62);
+}
+
+.floating-terminal--focused .ft-header {
+  cursor: default;
+}
+
+.floating-terminal--focus-background {
+  filter: blur(7px) saturate(0.72);
+  opacity: 0.42;
+  pointer-events: none;
 }
 
 .floating-terminal--working {

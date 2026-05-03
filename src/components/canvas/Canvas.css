@@ -42,6 +42,19 @@
   pointer-events: auto;
 }
 
+.canvas-focus-backdrop {
+  position: absolute;
+  background: rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(10px) saturate(0.82);
+  pointer-events: auto;
+  animation: canvas-focus-fade 0.15s cubic-bezier(0.2, 0, 0, 1);
+}
+
+@keyframes canvas-focus-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 /* ---- Voice status cluster ------------------------------------------ */
 .canvas-status-cluster {
   position: fixed;

@@ -65,6 +65,7 @@
 
 | Time | Action | File(s) | Outcome | ~Tokens |
 |------|--------|---------|---------|--------|
+| 16:26 | Researched Roblox discovery/personalization signals for shared article synthesis | `.wolf/OPENWOLF.md`, `.wolf/anatomy.md` | Identified core signals, source-vs-ranking distinctions, and experimentation/personalization hooks | ~1200 |
 | 18:59 | reproduced Cursor no-output report and patched headless trust flags | src-tauri/src/providers/cursor.rs, .wolf/buglog.json, .wolf/cerebrum.md | `cursor-agent -p` needs `--trust`; cargo fmt/check/clippy passed after adding trust/MCP approval flags | ~5500 |
 | 19:08 | fixed fast provider finalization dropping Cursor assistant text | src/hooks/useClaudeEvents.ts, src/lib/cursorEventDecoder.ts, .wolf/buglog.json, .wolf/cerebrum.md | refreshed Zustand snapshot after text flush and added Cursor result fallback; npm typecheck passed | ~7000 |
 | 19:24 | fixed Cursor MCP config and changed delegation planning to StartDelegation tool | mcp/delegation-common.mjs, src-tauri/src/lib.rs, src/components/claude/ClaudeChat.tsx, src/lib/providers.ts | Cursor MCP now uses content-length/env placeholders; /delegate watches StartDelegation tool calls; typecheck, cargo check/clippy, and node --check passed | ~18000 |
@@ -616,3 +617,32 @@
 | 06:48 | Expanded provider CLI PATH for Roblox toolchain managers | src-tauri/src/providers/util.rs, .wolf/buglog.json, .wolf/cerebrum.md | Codex/Claude/Cursor shared PATH now includes Aftman/Rokit/Foreman/Wally bins so luau-lsp can resolve when installed there; Rust fmt/check/clippy and targeted util tests passed | ~7000 |
 | 06:57 | Installed official luau-lsp 1.66.1 macOS universal binary into ~/.local/bin and verified provider-expanded PATH resolves it | ~/.local/bin/luau-lsp | luau-lsp available to shell and T64 provider PATH | ~2k |
 | 07:02 | Researched latest t3code PATH/provider environment handling | /tmp/t3code.OVUK2p/t3code | T3 hydrates server PATH from login shell/launchctl/PowerShell and supports per-provider binary/env settings | ~8k |
+
+## Session: 2026-05-03 16:21
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 16:27 | Recorded research notes on Roblox discovery/search quirks, official signals, and creator folklore for shared article synthesis | `.wolf/OPENWOLF.md`, `.wolf/anatomy.md`, `.wolf/cerebrum.md`, web sources | Source set gathered; no repo code changes | ~1200 |
+| 16:31 | Added Cerebrum learning about Roblox discovery/search quirks and confirmed/fixed creator pain points | `.wolf/cerebrum.md` | Session memory updated for future research | ~250 |
+
+## Session: 2026-05-03 16:21
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-03 16:21
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+
+## Session: 2026-05-03 16:21
+
+| Time | Action | File(s) | Outcome | ~Tokens |
+|------|--------|---------|---------|--------|
+| 16:30 | Checked whether the provider snapshot/event benchmark gap was completed | src-tauri/src/providers/*, src/contracts/providerRuntime.ts, src/lib/providerSnapshots.ts | Most landed; frontend static fallback and deprecated ProviderTurnInput fields remain | ~6k |
+| 16:58 | Fixed provider chat links opening inside the Tauri WebView | src/components/provider-chat/ChatMessage.tsx, src/lib/tauriApi.ts, src-tauri/src/lib.rs, .wolf/buglog.json, .wolf/cerebrum.md | Chat markdown links now prevent default navigation and open validated external URLs via the OS default handler; typecheck and cargo check passed | ~5k |
+| 19:12 | Added provider chat focus mode on the X keybind | src/App.tsx, src/lib/keybindingEngine.ts, src/stores/canvasStore.ts, src/components/canvas/Canvas.tsx, src/components/canvas/FloatingTerminal.tsx, src/components/canvas/Canvas.css, src/components/canvas/FloatingTerminal.css, .wolf/cerebrum.md | Active provider chats can toggle focus mode with X; focused panel gets temporary screen-centered geometry, blurred backdrop, and fixed bottom close button; typecheck/build passed | ~8k |
+| 19:52 | Tightened focus mode dismissal and zoom behavior | src/components/canvas/Canvas.tsx, src/components/canvas/FloatingTerminal.tsx, src/components/canvas/Canvas.css, src/components/canvas/FloatingTerminal.css, .wolf/buglog.json, .wolf/cerebrum.md | Removed bottom focus close button, made focused header X exit focus, removed focused outline/stroke, and subscribed focus frame to pan/zoom for constant screen size; typecheck/build passed | ~5k |
+| 19:54 | Counter-scaled focused chat UI against canvas zoom | src/components/canvas/Canvas.tsx, src/components/canvas/FloatingTerminal.tsx, src/components/canvas/FloatingTerminal.css, .wolf/buglog.json, .wolf/cerebrum.md | Focused chat now uses real screen-pixel dimensions plus inverse child scale so both frame and internal UI stay screen-sized under canvas zoom; typecheck/build passed | ~3k |
+| 20:02 | Set focused provider chat width to 65vw | src/components/canvas/Canvas.tsx, .wolf/cerebrum.md | Focus frame now targets 65% of viewport width while preserving inverse zoom scaling; typecheck passed | ~1k |
+| 20:03 | Removed geometric focus animation that tweened through scaled states | src/components/canvas/FloatingTerminal.css, .wolf/buglog.json, .wolf/cerebrum.md | Focus enter/exit now snaps geometry and only animates visual properties, avoiding zoom-scale interpolation artifacts; typecheck passed | ~1k |

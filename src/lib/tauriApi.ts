@@ -48,6 +48,10 @@ import type { ProviderTurnInput } from "../contracts/providerRuntime";
 
 // PTY terminal commands
 
+export async function openExternalUrl(url: string): Promise<void> {
+  return invoke("open_external_url", { url });
+}
+
 export async function createTerminal(req: CreateTerminalRequest): Promise<void> {
   return invoke("create_terminal", { req });
 }

@@ -3727,6 +3727,82 @@
       "related_bugs": [],
       "occurrences": 1,
       "last_seen": "2026-05-02T04:48:29Z"
+    },
+    {
+      "id": "bug-196",
+      "timestamp": "2026-05-03T14:58:37Z",
+      "error_message": "Links opened from Claude/provider chat navigate inside the Tauri app instead of opening in the user's external browser.",
+      "file": "src/components/provider-chat/ChatMessage.tsx, src/lib/tauriApi.ts, src-tauri/src/lib.rs",
+      "root_cause": "Chat markdown links rendered as normal anchors inside the Tauri WebView. Clicking them allowed WebView navigation, so external URLs could replace or open inside Terminal 64 instead of being handed to the OS browser.",
+      "fix": "Added a validated open_external_url Tauri command that launches http/https/mailto URLs through the OS default handler, exposed it through tauriApi.openExternalUrl, and made chat links prevent default WebView navigation before calling the command.",
+      "tags": [
+        "chat",
+        "links",
+        "tauri",
+        "browser",
+        "webview"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-03T14:58:37Z"
+    },
+    {
+      "id": "bug-197",
+      "timestamp": "2026-05-03T17:52:22Z",
+      "error_message": "Provider chat focus mode has a redundant bottom close button, adds an unwanted focused outline/stroke, and does not keep a constant screen size when canvas zoom changes.",
+      "file": "src/components/canvas/Canvas.tsx, src/components/canvas/FloatingTerminal.tsx, src/components/canvas/Canvas.css, src/components/canvas/FloatingTerminal.css",
+      "root_cause": "Focus mode used a separate fixed close button instead of reusing the chat header close button, styled the focused panel with an extra border/outline shadow, and computed screen-space geometry from a one-time canvas pan/zoom snapshot.",
+      "fix": "Removed the bottom close control, made the focused chat header X clear focus before normal close behavior, removed the focused border/outline styling, and made focus geometry subscribe to pan/zoom while focused so the panel remains a constant screen size.",
+      "tags": [
+        "chat",
+        "focus-mode",
+        "canvas",
+        "zoom",
+        "ui"
+      ],
+      "related_bugs": [],
+      "occurrences": 1,
+      "last_seen": "2026-05-03T17:52:22Z"
+    },
+    {
+      "id": "bug-198",
+      "timestamp": "2026-05-03T17:54:47Z",
+      "error_message": "Focused chat panel frame stayed roughly screen-sized, but the chat UI inside still became smaller/larger with canvas zoom.",
+      "file": "src/components/canvas/Canvas.tsx, src/components/canvas/FloatingTerminal.tsx, src/components/canvas/FloatingTerminal.css",
+      "root_cause": "The focused panel remained inside `.canvas-content`, whose parent transform scales all descendants. The previous fix divided the panel frame dimensions by zoom, but did not counter-scale the focused panel contents.",
+      "fix": "Changed focused frame dimensions to real screen-pixel layout dimensions and applied an inverse `scale(1 / canvasZoom)` transform with top-left origin to the focused FloatingTerminal, so parent canvas zoom and child inverse zoom cancel out.",
+      "tags": [
+        "chat",
+        "focus-mode",
+        "canvas",
+        "zoom",
+        "scale"
+      ],
+      "related_bugs": [
+        "bug-197"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-03T17:54:47Z"
+    },
+    {
+      "id": "bug-199",
+      "timestamp": "2026-05-03T18:03:36Z",
+      "error_message": "Focus mode enter/exit animation tweaks out because geometric focus properties tween through scaled canvas states.",
+      "file": "src/components/canvas/FloatingTerminal.css",
+      "root_cause": "The focus mode CSS transitioned `left`, `top`, `width`, `height`, and `transform` while also using inverse scale to counter the canvas transform, causing the panel to interpolate through incorrect intermediate sizes/positions.",
+      "fix": "Removed geometric and transform properties from the floating terminal transition list, keeping only visual properties (`border-color`, `box-shadow`, `filter`, `opacity`) animated.",
+      "tags": [
+        "chat",
+        "focus-mode",
+        "animation",
+        "canvas",
+        "zoom"
+      ],
+      "related_bugs": [
+        "bug-198"
+      ],
+      "occurrences": 1,
+      "last_seen": "2026-05-03T18:03:36Z"
     }
   ]
 }
