@@ -38,47 +38,14 @@ zip = "2"
 rusqlite = { version = "0.39", features = ["bundled"] }
 zerocopy = "0.8"
 toml_edit = "0.25"
-# Voice control: mic capture + resample + ASR
-cpal = "0.15"
-rubato = "0.15"
-# ONNX runtime for voice models (wake word, VAD, Moonshine ASR).
-ort = { version = "=2.0.0-rc.11", default-features = false, features = ["std", "ndarray", "download-binaries", "tls-native"] }
-ndarray = "0.17"
-tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 sha2 = "0.10"
 hex = "0.4"
-# whisper-rs is optional: its whisper.cpp build requires cmake, which isn't
-# a baseline dev dep yet. Enable with `--features voice-dictation` once cmake
-# is provisioned on the build host. The voice/whisper.rs stub compiles either way.
-whisper-rs = { version = "0.13", default-features = false, optional = true }
-# Discord voice-note transcription: after afconvert/ffmpeg turns the OGG Opus
-# attachment into a WAV, symphonia reads it into f32 PCM for whisper-rs.
-symphonia = { version = "0.5", default-features = false, features = ["wav", "pcm"] }
 
 [features]
-# Voice dictation is OFF by default so fresh clones build without cmake +
-# LLVM/libclang (whisper-rs's bindgen step needs both). Enable on macOS/Linux
-# with `cargo build --features voice-dictation`; on Windows also set
-# `LIBCLANG_PATH` to your LLVM install (winget install LLVM.LLVM).
 default = []
-# Enable whisper.cpp dictation. Requires:
-#  - cmake (to compile whisper.cpp)
-#  - LLVM/libclang (bindgen reads whisper.h — without it every struct field
-#    collapses to `_address` and you get ~70 E0609 errors on build)
-voice-dictation = ["dep:whisper-rs"]
-# Experimental: grammar-constrained decoding for the command STT path. Off by default
-# because the grammar is still being tuned; referenced from voice/command_stt.rs.
-voice-command-grammar = []
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-
-# Enable the Metal GPU backend for whisper.cpp only on macOS; unions with the base optional entry above.
-[target.'cfg(target_os = "macos")'.dependencies.whisper-rs]
-version = "0.13"
-default-features = false
-features = ["metal"]
-optional = true
 
 [lints.rust]
 unsafe_code = "warn"

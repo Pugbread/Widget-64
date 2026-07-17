@@ -859,12 +859,11 @@ async fn run_gateway(
                                 }
 
                                 // Download Discord attachments into the session CWD so Claude can read them.
-                                // Discord voice notes (recorded with the in-app mic button) carry a
-                                // `waveform` field + content_type audio/ogg — transcribe them via
-                                // whisper and inline the text instead of dropping an .ogg Claude
-                                // can't play.
+                                // Discord voice notes carry a `waveform` field or audio content type.
+                                // Keep them as readable attachment references; Widget 64 deliberately
+                                // ships without Terminal 64's heavyweight local speech runtime.
                                 let mut attachment_lines = Vec::new();
-                                let mut voice_transcripts: Vec<String> = Vec::new();
+                                let voice_transcripts: Vec<String> = Vec::new();
                                 let mut voice_note_count = 0usize;
                                 let mut voice_transcription_failures = 0usize;
                                 if let Some(atts) = attachments {
@@ -927,82 +926,11 @@ async fn run_gateway(
                                                         safe_eprintln!("[discord] Downloaded attachment: {} -> {}", filename, dest.display());
                                                         if is_voice_note {
                                                             voice_note_count += 1;
-                                                            // Transcribe on the blocking pool so whisper.cpp
-                                                            // doesn't stall the gateway's tokio runtime.
-                                                            let path_owned = dest.clone();
-                                                            let res = tokio::task::spawn_blocking(move || {
-                                                                let samples = crate::voice::audio_file::load_as_16k_mono(&path_owned)?;
-                                                                let need = (crate::voice::audio_file::TARGET_RATE as usize * 11) / 10;
-                                                                let padded: Vec<f32> = if samples.len() < need {
-                                                                    let mut v = samples;
-                                                                    v.resize(need, 0.0);
-                                                                    v
-                                                                } else { samples };
-                                                                let info = crate::voice::models::find(crate::voice::models::ModelKind::Whisper, "small.en-q5_1")
-                                                                    .ok_or_else(|| "whisper model not in registry".to_string())?;
-                                                                if !crate::voice::models::is_downloaded(info) {
-                                                                    return Err("whisper model not downloaded".to_string());
-                                                                }
-                                                                let dir = crate::voice::models::model_dir(crate::voice::models::ModelKind::Whisper, "small.en-q5_1")?;
-                                                                let bin = dir.join("ggml-small.en-q5_1.bin");
-                                                                let runner = crate::voice::whisper::WhisperRunner::load(&bin)?;
-                                                                let raw = runner.transcribe_oneshot(&padded)?;
-                                                                Ok::<String, String>(crate::voice::whisper::strip_whisper_tags(&raw))
-                                                            }).await;
-                                                            match res {
-                                                                Ok(Ok(text)) => {
-                                                                    let trimmed = text.trim();
-                                                                    if !trimmed.is_empty() {
-                                                                        safe_eprintln!("[discord] Voice note transcribed ({} chars)", trimmed.len());
-                                                                        // Echo the transcript back to Discord as a
-                                                                        // plain markdown blockquote — no tag, just
-                                                                        // the message itself, one blockquote line per
-                                                                        // transcript line. A small-text separator line
-                                                                        // follows so the blockquote reads distinct
-                                                                        // from Claude's streamed response that lands
-                                                                        // right after. 2000-char Discord limit —
-                                                                        // truncate with ellipsis.
-                                                                        let quoted: String = trimmed
-                                                                            .lines()
-                                                                            .map(|l| format!("> {}", l))
-                                                                            .collect::<Vec<_>>()
-                                                                            .join("\n");
-                                                                        let divider = "\n-# ─────────────────────────";
-                                                                        let body = format!("{}{}", quoted, divider);
-                                                                        let echo = if body.len() > 1990 {
-                                                                            // Drop the divider if we're already near the
-                                                                            // limit; prefer preserving the transcript.
-                                                                            format!("{}…", &quoted[..quoted.len().min(1989)])
-                                                                        } else {
-                                                                            body
-                                                                        };
-                                                                        let _ = send_discord_message(typing_http, token, channel_id, &echo).await;
-                                                                        // Posting a message clears Discord's typing
-                                                                        // indicator. Re-trigger it so the user sees
-                                                                        // the bot is thinking (= Claude processing)
-                                                                        // through to the actual response, not just
-                                                                        // until the echo lands.
-                                                                        trigger_typing(typing_http, token, channel_id).await;
-                                                                        // Send only the RAW transcript into the Claude
-                                                                        // prompt — the tag is for Discord readers, not
-                                                                        // for the model.
-                                                                        voice_transcripts.push(trimmed.to_string());
-                                                                    } else {
-                                                                        safe_eprintln!("[discord] Voice note transcription empty");
-                                                                        voice_transcription_failures += 1;
-                                                                    }
-                                                                }
-                                                                Ok(Err(e)) => {
-                                                                    voice_transcription_failures += 1;
-                                                                    safe_eprintln!("[discord] Voice note transcription failed: {}", e);
-                                                                }
-                                                                Err(e) => {
-                                                                    voice_transcription_failures += 1;
-                                                                    safe_eprintln!("[discord] Voice note task panicked: {}", e);
-                                                                }
-                                                            }
-                                                            // Always clean up the .ogg — we've extracted what we need.
-                                                            let _ = std::fs::remove_file(&dest);
+                                                            voice_transcription_failures += 1;
+                                                            attachment_lines.push(format!(
+                                                                "[Attached voice message: {}]",
+                                                                dest.display()
+                                                            ));
                                                         } else {
                                                             attachment_lines.push(format!("[Attached file: {}]", dest.display()));
                                                         }

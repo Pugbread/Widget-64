@@ -24,15 +24,12 @@ mod browser_manager;
 mod claude_manager;
 mod discord_bot;
 mod language_tools;
-mod mic_manager;
 mod permission_mcp;
 mod permission_server;
 mod plugin_manifest_store;
 mod providers;
 mod pty_manager;
 mod types;
-mod voice;
-mod voice_manager;
 mod widget_bridge_broker;
 mod widget_instructions;
 mod widget_scaffold;
@@ -142,7 +139,6 @@ fn open_external_url(url: String) -> Result<(), String> {
 
 use browser_manager::BrowserManager;
 use discord_bot::DiscordBot;
-use mic_manager::MicManager;
 use permission_server::PermissionServer;
 use plugin_manifest_store::{read_widget_approval, read_widget_manifest, write_widget_approval};
 use providers::{
@@ -154,7 +150,6 @@ use pty_manager::PtyManager;
 use std::sync::{Arc, Mutex};
 use tauri::{Emitter, Manager};
 use types::*;
-use voice_manager::VoiceManager;
 use widget_bridge_broker::{
     WidgetBridgeBroker, WidgetBridgeEmitEventRequest, WidgetBridgeRespondRequest,
 };
@@ -318,11 +313,6 @@ struct AppState {
     widget_bridge_broker: Arc<WidgetBridgeBroker>,
     widget_webview_manager: WidgetWebviewManager,
     widget_server: WidgetServer,
-    // Retained on AppState so its subscribers stay alive for the duration of the app,
-    // even though all mic access currently flows through VoiceManager.
-    #[allow(dead_code)]
-    mic_manager: Arc<MicManager>,
-    voice_manager: Arc<VoiceManager>,
 }
 
 #[tauri::command]
@@ -5945,158 +5935,6 @@ fn widget_bridge_emit_event(
     state.widget_bridge_broker.emit_event(req)
 }
 
-// ---- Voice control commands ----
-// Names and payload shapes match src/lib/voiceApi.ts exactly.
-
-#[tauri::command]
-fn start_voice(
-    state: tauri::State<'_, AppState>,
-    app_handle: tauri::AppHandle,
-    wake_word: Option<String>,
-) -> Result<(), String> {
-    use voice::adapters::{CommandAdapter, DictationAdapter, VadAdapter, WakeAdapter};
-
-    let wake = wake_word.as_deref().unwrap_or("jarvis");
-    state.voice_manager.set_wake_word(wake);
-    match WakeAdapter::try_load(wake) {
-        Ok(a) => state.voice_manager.set_wake_runner(Box::new(a)),
-        Err(e) => {
-            safe_eprintln!("[voice] wake runner unavailable: {}", e);
-            return Err(format!("wake runner: {e}"));
-        }
-    }
-    match CommandAdapter::try_load() {
-        Ok(a) => state.voice_manager.set_command_runner(Box::new(a)),
-        Err(e) => {
-            safe_eprintln!("[voice] command runner unavailable: {}", e);
-            return Err(format!("command runner: {e}"));
-        }
-    }
-    match VadAdapter::try_load() {
-        Ok(a) => state.voice_manager.set_vad(Box::new(a)),
-        Err(e) => safe_eprintln!("[voice] vad unavailable (amplitude fallback): {}", e),
-    }
-    match DictationAdapter::try_load(app_handle.clone()) {
-        Ok(a) => {
-            safe_eprintln!("[voice] whisper streaming dictation runner loaded");
-            state.voice_manager.set_dictation_runner(Box::new(a));
-        }
-        Err(e) => safe_eprintln!("[voice] dictation unavailable (moonshine fallback): {}", e),
-    }
-
-    state.voice_manager.start(app_handle)
-}
-
-#[tauri::command]
-fn stop_voice(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.voice_manager.stop();
-    Ok(())
-}
-
-/// Wire the settings-panel sensitivity slider (0..1, higher = more sensitive)
-/// to the wake-word detector threshold. Previously the slider wrote to
-/// localStorage only and never reached the Rust side — users at 100% were
-/// still running the 0.55 default threshold.
-#[tauri::command]
-fn voice_set_sensitivity(
-    state: tauri::State<'_, AppState>,
-    sensitivity: f32,
-) -> Result<(), String> {
-    state.voice_manager.set_sensitivity(sensitivity);
-    Ok(())
-}
-
-/// Called when a `SelectSession` intent fails to fuzzy-match on the frontend.
-/// Forces the state machine back to Idle so the user's next utterance doesn't
-/// leak into whatever session happened to be active before.
-#[tauri::command]
-fn voice_abort_dictation(state: tauri::State<'_, AppState>) -> Result<(), String> {
-    state.voice_manager.abort_dictation();
-    Ok(())
-}
-
-/// Run the Agent 4 §7 self-test on demand. Emits `voice-selftest` when
-/// finished; also returns the report so the caller can decide what to show.
-/// Runs on the tokio blocking pool because Metal shader compile inside
-/// whisper.cpp can block for 1–2 s on cold machines.
-#[tauri::command]
-async fn voice_run_selftest(
-    app_handle: tauri::AppHandle,
-) -> Result<voice::testkit::SelfTestReport, String> {
-    tauri::async_runtime::spawn_blocking(move || voice::testkit::run_self_test(&app_handle))
-        .await
-        .map_err(|e| format!("selftest join: {e}"))
-}
-
-/// Walk a directory of WAV files and run each through wake → vad → dictation,
-/// writing a JSON report. Used for regression testing (Agent 4 §10). Returns
-/// the report after writing it to `out_path` (or `<dir>/voice_fixtures_report.json`
-/// when `out_path` is omitted).
-#[tauri::command]
-async fn voice_run_fixtures(
-    app_handle: tauri::AppHandle,
-    dir: String,
-    out_path: Option<String>,
-) -> Result<voice::testkit::FixturesReport, String> {
-    let dir_buf = std::path::PathBuf::from(dir);
-    let out_buf = out_path.map(std::path::PathBuf::from);
-    tauri::async_runtime::spawn_blocking(move || {
-        voice::testkit::run_fixtures(&app_handle, &dir_buf, out_buf.as_deref())
-    })
-    .await
-    .map_err(|e| format!("fixtures join: {e}"))?
-}
-
-/// Maps the granular per-kind model registry (voice::models) to the flat
-/// {wake, command, dictation} view the frontend persists. `command` aggregates
-/// Moonshine + Silero VAD (both must be present for commands to work).
-#[tauri::command]
-fn voice_models_status() -> Result<types::VoiceModelsStatus, String> {
-    use voice::models::{find, is_downloaded, ModelKind};
-    let wake = find(ModelKind::Wake, "jarvis")
-        .map(is_downloaded)
-        .unwrap_or(false);
-    let moonshine = find(ModelKind::Moonshine, "base")
-        .map(is_downloaded)
-        .unwrap_or(false);
-    let vad = find(ModelKind::Vad, "silero")
-        .map(is_downloaded)
-        .unwrap_or(false);
-    let dictation = find(ModelKind::Whisper, "small.en-q5_1")
-        .map(is_downloaded)
-        .unwrap_or(false);
-
-    Ok(types::VoiceModelsStatus {
-        wake,
-        command: moonshine && vad,
-        dictation,
-    })
-}
-
-/// Trigger download of the model bundle for a given frontend `kind`
-/// (`"wake" | "command" | "dictation"`). Progress is streamed via
-/// `voice-download-progress` events emitted by `voice::models::ensure`.
-/// Concrete download behaviour lives in that module (owned by the
-/// model-runtime agent); this command dispatches to it and awaits.
-#[tauri::command]
-async fn download_voice_model(app_handle: tauri::AppHandle, kind: String) -> Result<(), String> {
-    use voice::models::{ensure, ModelKind};
-
-    let targets: Vec<(ModelKind, &str)> = match kind.as_str() {
-        "wake" => vec![(ModelKind::Wake, "jarvis")],
-        // "command" = Moonshine STT + Silero VAD (both are required to
-        // classify a voice command).
-        "command" => vec![(ModelKind::Moonshine, "base"), (ModelKind::Vad, "silero")],
-        "dictation" => vec![(ModelKind::Whisper, "small.en-q5_1")],
-        other => return Err(format!("unknown voice model kind: {}", other)),
-    };
-
-    for (mk, name) in targets {
-        ensure(&app_handle, mk, name).await?;
-    }
-    Ok(())
-}
-
 /// Install a specific bundled widget by name to ~/.terminal64/widgets/.
 /// In production: reads from the Tauri resource dir (packaged via tauri.conf.json).
 /// In dev: falls back to CARGO_MANIFEST_DIR so unpackaged runs still work.
@@ -6171,8 +6009,6 @@ pub fn run() {
             })?;
             let widget_bridge_broker = Arc::new(WidgetBridgeBroker::new(app.handle().clone()));
             widget_srv.set_native_bridge(Arc::clone(&widget_bridge_broker));
-            let mic_mgr = MicManager::new();
-            let voice_mgr = VoiceManager::new(Arc::clone(&mic_mgr));
             let claude_adapter = Arc::new(ClaudeAdapter::new());
             let codex_adapter = Arc::new(CodexAdapter::new());
             let cursor_adapter = Arc::new(CursorAdapter::new());
@@ -6199,15 +6035,7 @@ pub fn run() {
                 widget_bridge_broker,
                 widget_webview_manager: WidgetWebviewManager::new(),
                 widget_server: widget_srv,
-                mic_manager: mic_mgr,
-                voice_manager: voice_mgr,
             });
-
-            // Voice self-test is opt-in — only run when the user explicitly
-            // triggers it via the `voice_run_selftest` Tauri command. Running it
-            // at startup on fresh installs spams stderr with "model missing"
-            // errors and forces whisper's Metal shader compile for a feature
-            // the user hasn't opted into.
 
             // Bridge skills on startup: set up the outgoing ~/.claude/skills
             // symlinks, then pull in any skills that live under ~/.claude/skills
@@ -6388,14 +6216,6 @@ pub fn run() {
             sync_claude_skills,
             generate_skill_metadata,
             install_bundled_widget,
-            start_voice,
-            stop_voice,
-            voice_set_sensitivity,
-            voice_abort_dictation,
-            voice_models_status,
-            download_voice_model,
-            voice_run_selftest,
-            voice_run_fixtures,
         ])
         .run(tauri::generate_context!())
         .unwrap_or_else(|e| {
