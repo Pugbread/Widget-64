@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { listWidgetFolders, createWidgetFolder, deleteWidgetFolder, installWidgetZip, installBundledWidget, writeWidgetInstructionFiles, readWidgetManifest, readWidgetApproval, writeWidgetApproval } from "../../lib/tauriApi";
+import { listWidgetFolders, createWidgetFolder, deleteWidgetFolder, installWidgetZip, installBundledWidget, readWidgetManifest, readWidgetApproval, writeWidgetApproval } from "../../lib/tauriApi";
 import { useCanvasStore } from "../../stores/canvasStore";
 import { useProviderSessionStore } from "../../stores/providerSessionStore";
 import { useSettingsStore } from "../../stores/settingsStore";
@@ -116,7 +116,6 @@ export default function WidgetDialog({ isOpen, onClose }: WidgetDialogProps) {
     setCreating(true);
     try {
       const folderPath = await createWidgetFolder(id);
-      await writeWidgetInstructionFiles(id);
       const widgetName = name.trim();
       const sessionName = `Widget: ${widgetName}`;
       // Open widget panel on canvas

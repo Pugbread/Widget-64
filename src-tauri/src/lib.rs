@@ -4040,8 +4040,21 @@ fn create_dir_link(target: &std::path::Path, link: &std::path::Path) -> std::io:
 
 #[tauri::command]
 fn create_widget_folder(widget_id: String) -> Result<String, String> {
+    validate_widget_id(&widget_id)?;
     let dir = widgets_base_dir()?.join(&widget_id);
-    std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir: {}", e))?;
+    if dir.exists() {
+        let mut entries = std::fs::read_dir(&dir).map_err(|e| format!("read widget dir: {e}"))?;
+        if entries
+            .next()
+            .transpose()
+            .map_err(|e| format!("read widget dir: {e}"))?
+            .is_some()
+        {
+            return Ok(dir.to_string_lossy().to_string());
+        }
+    }
+
+    widget_scaffold::scaffold_widget_project(&dir, &widget_id, "")?;
     Ok(dir.to_string_lossy().to_string())
 }
 

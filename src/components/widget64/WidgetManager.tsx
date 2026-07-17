@@ -164,7 +164,7 @@ export default function WidgetManager({ open, onClose }: WidgetManagerProps) {
             <div className="manager-section-heading">
               <div>
                 <h3 id="create-widget-title">Create a widget</h3>
-                <p>A complete Vite + Tauri project, ready here and standalone.</p>
+                <p>Every widget is a Tauri 2 app. Widget 64 embeds its frontend.</p>
               </div>
               <span className="manager-runtime-badge"><i />Tauri 2</span>
             </div>
@@ -186,7 +186,7 @@ export default function WidgetManager({ open, onClose }: WidgetManagerProps) {
             </div>
             <div className="manager-scaffold-note">
               <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.5 13 5.25v5.5L8 13.5l-5-2.75v-5.5zM3.3 5.5 8 8l4.7-2.5M8 8v5.2" /></svg>
-              <span><strong>LLM-ready by default.</strong> New folders include `AGENTS.md`, the Widget 64 bridge contract, and standalone fallbacks.</span>
+              <span><strong>Tauri and LLM-ready by default.</strong> New folders include the native app, `AGENTS.md`, the Widget 64 bridge contract, and standalone fallbacks.</span>
             </div>
             {createdPath && (
               <button className="manager-created-path" type="button" onClick={() => openWidgetFolder(createdPath).catch(() => {})}>

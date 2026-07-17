@@ -19,7 +19,7 @@ Widget 64 takes the widget system and infinite canvas from [Terminal 64](https:/
 - **Infinite canvas** — pan, pinch-to-zoom, drag, resize, layer, and fit widgets on a persistent spatial surface.
 - **Overview** — packs every open widget into the current screen using its real dimensions, so portrait, square, and wide widgets stay proportional.
 - **Gallery** — lines widgets up horizontally at a shared visual height, preserves their aspect ratios, and maps vertical trackpad motion to horizontal browsing.
-- **Dual-runtime widgets** — every newly created widget is a Vite frontend and its own Tauri 2 application. The same source runs embedded in Widget 64 or in a standalone native window.
+- **Tauri-native widget format** — every created widget is a Tauri 2 application. Widget 64 embeds the same frontend that runs in its standalone native window.
 - **LLM-ready folders** — Widget 64 writes `AGENTS.md` and `CLAUDE.md` before it scaffolds the rest of a new widget. Any coding agent entering that folder immediately sees the runtime contract, bridge API, responsive rules, and run commands.
 - **Terminal 64 widget compatibility** — keeps the existing local widget server, hot reload, persistent state, permissions, postMessage bridge, native-webview transport, zip installation, and host API.
 

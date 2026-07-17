@@ -772,6 +772,7 @@ export async function clearT64DelegationEnv(cwd: string): Promise<void> {
 
 // Widget commands
 
+/** Legacy creation alias. A fresh folder is always scaffolded as a complete Tauri 2 app. */
 export async function createWidgetFolder(widgetId: string): Promise<string> {
   return invoke("create_widget_folder", { widgetId });
 }

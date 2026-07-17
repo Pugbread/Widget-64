@@ -482,7 +482,7 @@ mod tests {
     use std::fs;
 
     #[test]
-    fn creates_dual_runtime_widget_project() -> Result<(), Box<dyn Error>> {
+    fn creates_tauri_app_that_also_embeds() -> Result<(), Box<dyn Error>> {
         let dir = std::env::temp_dir().join(format!("widget64-scaffold-{}", uuid::Uuid::new_v4()));
         scaffold_widget_project(&dir, "build-monitor", "Build Monitor")?;
 
@@ -490,9 +490,11 @@ mod tests {
         assert!(dir.join("index.html").exists());
         assert!(dir.join("src/bridge.js").exists());
         assert!(dir.join("src-tauri/Cargo.toml").exists());
+        assert!(dir.join("src-tauri/src/main.rs").exists());
         assert!(dir.join("src-tauri/tauri.conf.json").exists());
+        assert!(dir.join("src-tauri/capabilities/default.json").exists());
         let agents = fs::read_to_string(dir.join("AGENTS.md"))?;
-        assert!(agents.contains("two equal targets"));
+        assert!(agents.contains("Tauri 2 desktop app by definition"));
         assert!(agents.contains("npm run tauri dev"));
 
         fs::remove_dir_all(dir)?;

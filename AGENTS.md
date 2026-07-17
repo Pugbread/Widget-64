@@ -8,7 +8,7 @@ Widget 64 is a Tauri 2 + React 19 desktop app derived from Terminal 64. Its visi
 - Preserve all three views: free canvas, fit-all overview, and horizontal gallery.
 - Preserve widget aspect ratios in overview and gallery layouts.
 - Keep existing Terminal 64 widgets compatible with the local server and postMessage bridge.
-- A new widget must be scaffolded as both an embedded Widget 64 widget and a standalone Tauri 2 app.
+- A new widget is a Tauri 2 app by definition; Widget 64 embeds that app's frontend without creating a separate web-only widget.
 - Write the complete widget-building context to `AGENTS.md` and `CLAUDE.md` before adding other scaffold files.
 - Never overwrite a non-empty widget folder during scaffolding.
 

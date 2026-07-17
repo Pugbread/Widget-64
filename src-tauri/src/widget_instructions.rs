@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 const WIDGET_INSTRUCTION_FILENAMES: [&str; 2] = ["CLAUDE.md", "AGENTS.md"];
 
-const WIDGET_BUILDING_INSTRUCTIONS: &str = r#"You are building a widget for Widget 64, a spatial desktop runtime for standalone Tauri widgets.
+const WIDGET_BUILDING_INSTRUCTIONS: &str = r#"You are building a widget for Widget 64, a spatial desktop runtime for Tauri widgets.
 
-A widget has two equal targets: it runs inside Widget 64 from `index.html`, and it runs as its own Tauri 2 desktop app from the `src-tauri/` project in this folder. Build one responsive frontend for both targets. Widget 64 hot-loads the source files through its local HTTP server; Vite builds those same files for Tauri.
+A widget is a Tauri 2 desktop app by definition. Widget 64 embeds that app's responsive web frontend from `index.html`; the `src-tauri/` project in this folder runs the same frontend as its own native window. Widget 64 hot-loads the source files through its local HTTP server, while Vite builds those same files for Tauri.
 
 **Rules:**
 - The entry point is always `index.html` - Widget 64 loads it automatically
@@ -323,7 +323,7 @@ mod tests {
 
         assert_eq!(paths.len(), 2);
         assert!(claude.contains("Widget 64 host API"));
-        assert!(claude.contains("two equal targets"));
+        assert!(claude.contains("Tauri 2 desktop app by definition"));
         assert!(claude.contains("Theme is reactive"));
         assert_eq!(claude, agents);
 
