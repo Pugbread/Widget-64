@@ -1,7 +1,7 @@
 {
-  "name": "terminal-64",
+  "name": "widget-64",
   "version": "0.1.0",
-  "description": "Canvas-based terminal emulator with multi-agent Claude Code, widgets, and MCP",
+  "description": "A spatial desktop for widgets that also run as standalone Tauri apps",
   "license": "MIT",
   "type": "module",
   "scripts": {
@@ -12,8 +12,8 @@
     "tauri:voice": "tauri dev -- -- --features voice-dictation",
     "typecheck": "tsc --noEmit"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": ["tauri", "widgets", "canvas", "desktop", "react"],
+  "author": "Pugbread",
   "engines": {
     "node": ">=20"
   },

@@ -35,6 +35,7 @@ mod voice;
 mod voice_manager;
 mod widget_bridge_broker;
 mod widget_instructions;
+mod widget_scaffold;
 mod widget_server;
 mod widget_webview_manager;
 
@@ -4055,6 +4056,25 @@ fn create_widget_folder(widget_id: String) -> Result<String, String> {
 }
 
 #[tauri::command]
+fn scaffold_widget_project(widget_id: String, display_name: String) -> Result<String, String> {
+    validate_widget_id(&widget_id)?;
+    let dir = widgets_base_dir()?.join(&widget_id);
+    widget_scaffold::scaffold_widget_project(&dir, &widget_id, &display_name)?;
+    Ok(dir.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn open_widget_folder(path: String) -> Result<(), String> {
+    let base = widgets_base_dir()?;
+    let canonical_base = std::fs::canonicalize(&base).map_err(|e| format!("widgets dir: {e}"))?;
+    let canonical_path = std::fs::canonicalize(&path).map_err(|e| format!("widget path: {e}"))?;
+    if !canonical_path.starts_with(&canonical_base) || !canonical_path.is_dir() {
+        return Err("Widget folder must be inside the Widget 64 widgets directory".into());
+    }
+    launch_external_url(&canonical_path.to_string_lossy())
+}
+
+#[tauri::command]
 fn write_widget_instruction_files(widget_id: String) -> Result<Vec<String>, String> {
     if widget_id.is_empty()
         || !widget_id
@@ -6308,6 +6328,8 @@ pub fn run() {
             ensure_codex_mcp,
             create_mcp_config_file,
             create_widget_folder,
+            scaffold_widget_project,
+            open_widget_folder,
             write_widget_instruction_files,
             read_widget_html,
             list_widget_folders,

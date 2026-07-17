@@ -1,10 +1,9 @@
 name: Release
 
-# Builds and publishes Terminal 64 installers for macOS (universal), Linux (x86_64), and Windows (x86_64).
+# Builds and publishes Widget 64 installers for macOS (universal), Linux (x86_64), and Windows (x86_64).
 # Triggers on a v-prefixed tag push or manual dispatch.
 #
 # App binaries remain OS-code-signing unsigned until Apple/Azure signing is configured.
-# Tauri updater artifacts are signed with Tauri's mandatory free updater key.
 
 on:
   push:
@@ -175,14 +174,12 @@ jobs:
           #   AZURE_CERTIFICATE_PROFILE
           #
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: ${{ needs.resolve-tag.outputs.tag }}
-          releaseName: "Terminal 64 ${{ needs.resolve-tag.outputs.tag }}"
+          releaseName: "Widget 64 ${{ needs.resolve-tag.outputs.tag }}"
           releaseDraft: true
           prerelease: false
-          args: ${{ matrix.platform.args }} --config '{"bundle":{"createUpdaterArtifacts":true}}'
+          args: ${{ matrix.platform.args }}
 
       - name: Collect bundle artifacts
         if: always()
@@ -209,7 +206,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: terminal64-${{ matrix.platform.name }}
+          name: widget64-${{ matrix.platform.name }}
           path: dist-artifacts/*
           if-no-files-found: warn
           retention-days: 7
@@ -232,7 +229,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
-          name: "Terminal 64 ${{ needs.resolve-tag.outputs.tag }}"
+          name: "Widget 64 ${{ needs.resolve-tag.outputs.tag }}"
           draft: true
           prerelease: false
           generate_release_notes: true

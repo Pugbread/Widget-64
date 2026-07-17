@@ -9,7 +9,8 @@ import {
 } from "../lib/constants";
 import type { SnapGuide } from "../lib/snapUtils";
 
-const CANVAS_STORAGE_KEY = "terminal64-session";
+const CANVAS_STORAGE_KEY = "widget64-workspace-v1";
+const LEGACY_CANVAS_STORAGE_KEY = "terminal64-session";
 const CANVAS_SAVE_DEBOUNCE_MS = 1000;
 
 export type PanelType = "terminal" | "claude" | "shared-chat" | "widget" | "browser";
@@ -188,36 +189,40 @@ function makeTerminal(zIndex: number, overrides: Partial<CanvasTerminal> = {}): 
 // Load saved session at init time (before any components mount)
 function getInitialState() {
   try {
-    const raw = localStorage.getItem(CANVAS_STORAGE_KEY);
+    const current = localStorage.getItem(CANVAS_STORAGE_KEY);
+    const raw = current ?? localStorage.getItem(LEGACY_CANVAS_STORAGE_KEY);
     if (raw) {
-      lastSavedSessionJson = raw;
+      if (current) lastSavedSessionJson = raw;
       const session = JSON.parse(raw);
       if (session.terminals?.length) {
-        const terminals = deserializeTerminals(session.terminals);
-        return {
-          terminals,
-          panX: session.panX ?? 0,
-          panY: session.panY ?? 0,
-          zoom: session.zoom ?? 1,
-          nextZ: terminals.length + 1,
-          activeTerminalId: terminals[0]?.terminalId ?? null,
-          focusedTerminalId: null,
-          snapGuides: [],
-        };
+        const terminals = deserializeTerminals(session.terminals).filter(
+          (panel) => panel.panelType === "widget" && panel.widgetId,
+        );
+        if (terminals.length > 0) {
+          return {
+            terminals,
+            panX: session.panX ?? 0,
+            panY: session.panY ?? 0,
+            zoom: session.zoom ?? 1,
+            nextZ: terminals.length + 1,
+            activeTerminalId: terminals[0]?.terminalId ?? null,
+            focusedTerminalId: null,
+            snapGuides: [],
+          };
+        }
       }
     }
   } catch (e) {
     console.warn("[canvasStore] Failed to load session from localStorage:", e);
   }
 
-  const def = makeTerminal(1);
   return {
-    terminals: [def],
+    terminals: [],
     panX: 0,
     panY: 0,
     zoom: 1,
-    nextZ: 2,
-    activeTerminalId: def.terminalId,
+    nextZ: 1,
+    activeTerminalId: null,
     focusedTerminalId: null,
     snapGuides: [],
   };
@@ -342,7 +347,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => {
     addWidgetTerminal: (widgetId, widgetName) => {
       return addPanel({
         title: widgetName || widgetId,
-        borderColor: "#f9e2af",
+        borderColor: "#78a7ff",
         panelType: "widget",
         widgetId,
       }, { width: 500, height: 400 });

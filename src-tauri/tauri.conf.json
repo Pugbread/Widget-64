@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "Terminal 64",
+  "productName": "Widget 64",
   "version": "0.1.0",
-  "identifier": "com.terminal64.app",
+  "identifier": "com.pugbread.widget64",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -12,11 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "Terminal 64",
-        "width": 1024,
-        "height": 768,
-        "minWidth": 400,
-        "minHeight": 300,
+        "title": "Widget 64",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 720,
+        "minHeight": 480,
         "resizable": true,
         "fullscreen": false,
         "center": true,
@@ -59,7 +59,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEU3OEU1QzM4NDJBODQ3MzUKUldRMVI2aENPRnlPNXc2UXoyVUtZalRDTnZpQ2xpdExVbVplNE5tdzZPZGtOY1JRQTh3UDZtTVAK",
       "endpoints": [
-        "https://github.com/Pugbread/Terminal-64/releases/latest/download/latest.json"
+        "https://github.com/Pugbread/Widget-64/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

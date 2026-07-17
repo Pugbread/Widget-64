@@ -1,696 +1,147 @@
-import { useEffect, useRef, useState } from "react";
-import { Toaster } from "sonner";
+import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { emit, listen } from "@tauri-apps/api/event";
-import Canvas from "./components/canvas/Canvas";
-import CommandPalette from "./components/command-palette/CommandPalette";
-import SettingsPanel from "./components/settings/SettingsPanel";
-import PopOutTerminal from "./components/canvas/PopOutTerminal";
-import { ProviderSessionDialog } from "./components/canvas/ProviderSessionDialog";
-import WidgetDialog from "./components/widget/WidgetDialog";
-import SkillDialog from "./components/skill/SkillDialog";
-import { useTheme } from "./hooks/useTheme";
-import { useKeybindings } from "./hooks/useKeybindings";
-import { useProviderEvents } from "./hooks/useProviderEvents";
-import { useDelegationOrchestrator } from "./hooks/useDelegationOrchestrator";
-import { usePerformanceMonitor } from "./hooks/usePerformanceMonitor";
-import { useCanvasStore } from "./stores/canvasStore";
-import { useThemeStore } from "./stores/themeStore";
-import { useSettingsStore } from "./stores/settingsStore";
-import { registerCommand } from "./lib/commands";
-import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
-import { closeTerminal, closeProviderSession, linkSessionToDiscord, unlinkSessionFromDiscord, renameDiscordSession, startDiscordBot, discordCleanupOrphaned, setAllBrowsersVisible, setAllWidgetWebviewsVisible, ensureSkillsPlugin, installWidgetZip, openwolfDaemonSwitch, openwolfProjectCwd, installBundledWidget } from "./lib/tauriApi";
-import { pushToast } from "./lib/notifications";
-import { useDelegationStore } from "./stores/delegationStore";
-import {
-  readProviderSessionMetadata,
-  readProviderSessionMetadataSnapshot,
-  resolveSessionProviderState,
-  useProviderSessionStore,
-  flushSave as flushProviderSessionSave,
-} from "./stores/providerSessionStore";
-import {
-  checkForUpdate,
-  downloadAndInstallUpdate,
-  relaunchApp,
-  type UpdateInfo,
-  type UpdateProgress,
-} from "./lib/updater";
+import { Toaster } from "sonner";
+import WidgetManager from "./components/widget64/WidgetManager";
+import WidgetWorkspace, { type WorkspaceView } from "./components/widget64/WidgetWorkspace";
+import { isTauriRuntime } from "./lib/runtime";
 import "./App.css";
 
-const appWindow = getCurrentWindow();
-const isPopOut = new URLSearchParams(window.location.search).has("popout");
+const VIEW_STORAGE_KEY = "widget64-active-view";
 
-type UpdateButtonState =
-  | { kind: "idle" }
-  | { kind: "checking" }
-  | { kind: "available"; update: UpdateInfo }
-  | { kind: "downloading"; update: UpdateInfo; progress: UpdateProgress }
-  | { kind: "installing"; update: UpdateInfo }
-  | { kind: "restarting"; update: UpdateInfo }
-  | { kind: "failed"; update: UpdateInfo; error: string };
+const viewOptions: Array<{ id: WorkspaceView; label: string; shortcut: string }> = [
+  { id: "canvas", label: "Canvas", shortcut: "1" },
+  { id: "overview", label: "Overview", shortcut: "2" },
+  { id: "gallery", label: "Gallery", shortcut: "3" },
+];
 
-type DiscordSyncSession = {
-  name?: string;
-  cwd?: string;
-};
-
-function syncNamedSessionToDiscord(sessionId: string, session: DiscordSyncSession | undefined) {
-  const name = session?.name?.trim();
-  if (!name) return;
-  const hasOpenProviderPanel = useCanvasStore
-    .getState()
-    .terminals
-    .some((t) => t.panelType === "claude" && t.terminalId === sessionId);
-  if (!hasOpenProviderPanel) return;
-  renameDiscordSession(sessionId, name, session?.cwd || "").catch((err) => {
-    console.warn("[discord] Failed to sync session:", sessionId, err);
-  });
+function initialView(): WorkspaceView {
+  const stored = localStorage.getItem(VIEW_STORAGE_KEY);
+  return stored === "overview" || stored === "gallery" ? stored : "canvas";
 }
 
-function updateButtonText(state: UpdateButtonState): string {
-  switch (state.kind) {
-    case "available":
-      return state.update.source === "tauri" ? `Update v${state.update.version}` : `v${state.update.version}`;
-    case "downloading":
-      return state.progress.percent === null ? "Downloading" : `${state.progress.percent}%`;
-    case "installing":
-      return "Installing";
-    case "restarting":
-      return "Restarting";
-    case "failed":
-      return "Update failed";
-    case "checking":
-      return "Checking";
-    case "idle":
-      return "";
+function ViewIcon({ view }: { view: WorkspaceView }) {
+  if (view === "canvas") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <path d="M3 5.5V3h2.5M10.5 3H13v2.5M13 10.5V13h-2.5M5.5 13H3v-2.5" />
+        <rect x="5.25" y="5.25" width="5.5" height="5.5" rx="1" />
+      </svg>
+    );
   }
-}
-
-function updateButtonTitle(state: UpdateButtonState): string {
-  switch (state.kind) {
-    case "available":
-      return state.update.source === "tauri"
-        ? `Install Terminal 64 v${state.update.version}`
-        : `Update available: v${state.update.version}. Open GitHub Releases.`;
-    case "downloading":
-      return "Downloading update";
-    case "installing":
-      return "Installing update";
-    case "restarting":
-      return "Restarting Terminal 64";
-    case "failed":
-      return state.error;
-    case "checking":
-      return "Checking for updates";
-    case "idle":
-      return "";
+  if (view === "overview") {
+    return (
+      <svg viewBox="0 0 16 16" aria-hidden="true">
+        <rect x="2.5" y="3" width="4.25" height="4" rx=".75" />
+        <rect x="8.5" y="3" width="5" height="4" rx=".75" />
+        <rect x="2.5" y="9" width="5" height="4" rx=".75" />
+        <rect x="9.25" y="9" width="4.25" height="4" rx=".75" />
+      </svg>
+    );
   }
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <rect x="1.75" y="3.25" width="4.5" height="9.5" rx="1" />
+      <rect x="7.25" y="3.25" width="7" height="9.5" rx="1" />
+    </svg>
+  );
 }
 
 function App() {
-  if (isPopOut) return <PopOutTerminal />;
-  const [paletteOpen, setPaletteOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [view, setViewState] = useState<WorkspaceView>(initialView);
+  const [managerOpen, setManagerOpen] = useState(false);
   const [isMaximized, setIsMaximized] = useState(false);
-  const [updateState, setUpdateState] = useState<UpdateButtonState>({ kind: "idle" });
-  const [providerSessionDialogOpen, setProviderSessionDialogOpen] = useState(false);
-  const [widgetDialogOpen, setWidgetDialogOpen] = useState(false);
-  const [skillDialogOpen, setSkillDialogOpen] = useState(false);
-  const focusedTerminalId = useCanvasStore((s) => s.focusedTerminalId);
 
-  useTheme();
-  useKeybindings();
-  useProviderEvents();
-  useDelegationOrchestrator();
-  usePerformanceMonitor();
-
-  const [widgetDropOver, setWidgetDropOver] = useState(false);
-  const widgetDialogRef = useRef(widgetDialogOpen);
-  widgetDialogRef.current = widgetDialogOpen;
-
-  // Global drag-drop: intercept .zip files and install as widgets (skips when widget dialog handles it)
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    getCurrentWebviewWindow()
-      .onDragDropEvent(async (event) => {
-        if (widgetDialogRef.current) return;
-        const payload = event.payload;
-        if (payload.type === "enter") {
-          const hasZip = payload.paths.some((p) => p.toLowerCase().endsWith(".zip"));
-          if (hasZip) setWidgetDropOver(true);
-        } else if (payload.type === "leave") {
-          setWidgetDropOver(false);
-        } else if (payload.type === "drop") {
-          setWidgetDropOver(false);
-          const zipFiles = payload.paths.filter((p) => p.toLowerCase().endsWith(".zip"));
-          for (const zipPath of zipFiles) {
-            try {
-              const widgetId = await installWidgetZip(zipPath);
-              useCanvasStore.getState().addWidgetTerminal(widgetId);
-              pushToast("Widget installed", widgetId);
-            } catch (err) {
-              pushToast("Widget install failed", String(err));
-            }
-          }
-        }
-      })
-      .then((fn) => { unlisten = fn; })
-      .catch((err) => console.warn("[widget-drop]", err));
-    return () => { if (unlisten) unlisten(); };
-  }, []);
-
-  // Hide all native browser webviews when any overlay is open (they render above DOM)
-  const anyOverlayOpen = settingsOpen || paletteOpen || providerSessionDialogOpen || widgetDialogOpen || skillDialogOpen || Boolean(focusedTerminalId);
-  useEffect(() => {
-    setAllBrowsersVisible(!anyOverlayOpen).catch(() => {});
-    setAllWidgetWebviewsVisible(!anyOverlayOpen).catch(() => {});
-  }, [anyOverlayOpen]);
-
-  useEffect(() => {
-    setUpdateState({ kind: "checking" });
-    checkForUpdate()
-      .then((available) => {
-        setUpdateState(available ? { kind: "available", update: available } : { kind: "idle" });
-      })
-      .catch((err) => {
-        console.warn("[updater] update check failed:", err);
-        setUpdateState({ kind: "idle" });
-      });
-    ensureSkillsPlugin().catch(() => {});
-  }, []);
-
-  const handleUpdateClick = async () => {
-    const current = updateState;
-    if (current.kind === "available" && current.update.source === "github") {
-      if (current.update.url) window.open(current.update.url);
-      return;
-    }
-    if (current.kind !== "available" && current.kind !== "failed") return;
-
-    const update = current.update;
-    if (update.source !== "tauri") {
-      if (update.url) window.open(update.url);
-      return;
-    }
-
-    try {
-      setUpdateState({
-        kind: "downloading",
-        update,
-        progress: { downloaded: 0, contentLength: 0, percent: null },
-      });
-      useCanvasStore.getState().saveSession();
-      flushProviderSessionSave();
-      useSettingsStore.getState().save();
-      await downloadAndInstallUpdate((progress) => {
-        setUpdateState(
-          progress.percent === 100
-            ? { kind: "installing", update }
-            : { kind: "downloading", update, progress },
-        );
-      });
-      setUpdateState({ kind: "installing", update });
-      useCanvasStore.getState().saveSession();
-      flushProviderSessionSave();
-      useSettingsStore.getState().save();
-      setUpdateState({ kind: "restarting", update });
-      await relaunchApp();
-    } catch (err) {
-      const message = String(err);
-      setUpdateState({ kind: "failed", update, error: message });
-      pushToast("Update failed", message);
-    }
+  const setView = (nextView: WorkspaceView) => {
+    setViewState(nextView);
+    localStorage.setItem(VIEW_STORAGE_KEY, nextView);
   };
 
-  // Restore saved settings (theme, opacity) on startup
   useEffect(() => {
-    const saved = useSettingsStore.getState();
-    if (saved.theme) useThemeStore.getState().setTheme(saved.theme);
-    if (saved.bgAlpha < 1) useThemeStore.getState().setBgAlpha(saved.bgAlpha);
-    // Sync bundled widgets to latest version on every launch
-    installBundledWidget("project-intel").catch(() => {});
-    // Auto-connect Discord bot if credentials are saved, then link open sessions
-    if (saved.discordBotToken && saved.discordServerId) {
-      startDiscordBot(saved.discordBotToken, saved.discordServerId).then(async () => {
-        // Wait for gateway to be ready, then link all open AI session panels sequentially.
-        await new Promise((r) => setTimeout(r, 2000));
-        const terminals = useCanvasStore.getState().terminals;
-        // Pull the authoritative name/cwd from the session store — canvas `t.title`
-        // is a stale snapshot that isn't updated when the user renames a session.
-        let savedSessions: Record<string, { name?: string; cwd?: string }> = {};
-        try {
-          savedSessions = readProviderSessionMetadataSnapshot();
-        } catch (e) {
-          console.warn("[discord] Failed to read session store:", e);
-        }
-        const providerSessions = useProviderSessionStore.getState().sessions;
-
-        for (const t of terminals) {
-          if (t.panelType !== "claude") continue;
-          const liveName = providerSessions[t.terminalId]?.name;
-          const savedName = savedSessions[t.terminalId]?.name;
-          const name = (liveName || savedName || "").trim();
-          if (!name) continue;
-          const cwd = providerSessions[t.terminalId]?.cwd
-            || savedSessions[t.terminalId]?.cwd
-            || t.cwd
-            || "";
-          try {
-            await renameDiscordSession(t.terminalId, name, cwd);
-          } catch (err) {
-            console.warn("[discord] Failed to rename/link session:", t.terminalId, err);
-            await new Promise((r) => setTimeout(r, 1500));
-            await renameDiscordSession(t.terminalId, name, cwd).catch(() => {});
-          }
-          await new Promise((r) => setTimeout(r, 500));
-        }
-        // Clean up Discord channels that no longer match any linked session
-        const activeIds = useCanvasStore.getState().terminals
-          .filter((x) => x.panelType === "claude")
-          .map((x) => x.terminalId);
-        discordCleanupOrphaned(activeIds).catch(() => {});
-      }).catch(() => {});
-    }
-    // Auto-start OpenWolf daemon if enabled. Prefer the project-intel widget's
-    // saved project dir (since only one daemon can run at a time — port 18791).
-    // Fall back to any provider-backed session's cwd.
-    if (saved.openwolfEnabled && saved.openwolfDaemon) {
-      openwolfProjectCwd()
-        .then((widgetCwd) => {
-          let cwd = widgetCwd;
-          if (!cwd) {
-            const providerSessions = useProviderSessionStore.getState().sessions;
-            cwd = Object.values(providerSessions).find((s) => s.cwd)?.cwd ?? null;
-          }
-          if (cwd) openwolfDaemonSwitch(cwd).catch(() => {});
-        })
-        .catch(() => {});
-    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      const isTyping = target?.matches("input, textarea, [contenteditable='true']");
+      if (isTyping || event.metaKey || event.ctrlKey || event.altKey) return;
+      if (event.key === "1") setView("canvas");
+      if (event.key === "2") setView("overview");
+      if (event.key === "3") setView("gallery");
+      if (event.key.toLowerCase() === "n") setManagerOpen(true);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Save ALL state on window close — critical for persistence
-  useEffect(() => {
-    let unlistenFn: (() => void) | undefined;
-    appWindow.onCloseRequested(() => {
-      useCanvasStore.getState().saveSession();
-      flushProviderSessionSave();
-    }).then((fn) => { unlistenFn = fn; });
-    return () => { unlistenFn?.(); };
-  }, []);
-
-  useEffect(() => {
-    appWindow.isMaximized().then(setIsMaximized);
-  }, []);
-
-  // Register commands
-  useEffect(() => {
-    const themeStore = useThemeStore.getState();
-
-    registerCommand({
-      id: "terminal.new",
-      label: "New Terminal",
-      category: "Terminal",
-      execute: () => useCanvasStore.getState().addTerminal(),
-    });
-
-    registerCommand({
-      id: "commandPalette.toggle",
-      label: "Toggle Command Palette",
-      category: "UI",
-      execute: () => setPaletteOpen((v) => !v),
-    });
-
-    registerCommand({
-      id: "settings.toggle",
-      label: "Toggle Settings",
-      category: "UI",
-      execute: () => setSettingsOpen((v) => !v),
-    });
-
-    registerCommand({
-      id: "claude.newSession",
-      label: "New Provider Session (same folder)",
-      category: "Provider",
-      execute: () => {
-        const canvas = useCanvasStore.getState();
-        const active = canvas.terminals.find(t => t.terminalId === canvas.activeTerminalId);
-        if (active?.panelType === "claude" && active.cwd) {
-          const parentSession = useProviderSessionStore.getState().sessions[active.terminalId];
-          const parentProvider = parentSession ? resolveSessionProviderState(parentSession).provider : "openai";
-          canvas.addClaudeTerminal(active.cwd, false);
-          const terminals = useCanvasStore.getState().terminals;
-          const newest = terminals[terminals.length - 1];
-          if (newest?.panelType === "claude") {
-            useProviderSessionStore.getState().createSession(newest.terminalId, undefined, false, undefined, active.cwd, parentProvider, false);
-          }
-        }
-      },
-    });
-
-    registerCommand({
-      id: "provider.focusMode.toggle",
-      label: "Toggle Provider Focus Mode",
-      category: "Provider",
-      execute: () => {
-        const canvas = useCanvasStore.getState();
-        const active = canvas.terminals.find(t => t.terminalId === canvas.activeTerminalId);
-        if (active?.panelType !== "claude") return;
-        canvas.bringToFront(active.id);
-        useCanvasStore.getState().toggleFocusedTerminal(active.terminalId);
-      },
-    });
-
-    for (const theme of themeStore.themes) {
-      registerCommand({
-        id: `theme.${theme.name.toLowerCase().replace(/\s+/g, "-")}`,
-        label: `Theme: ${theme.name}`,
-        category: "Themes",
-        execute: () => useThemeStore.getState().setTheme(theme.name),
-      });
-    }
-  }, []);
-
-  // Discord voice/text prompts normally route through the mounted ProviderChat
-  // listener. If the linked panel is closed, reopen it and replay the same
-  // event so it still enters the normal handleSend path.
-  useEffect(() => {
-    let unlisten: (() => void) | null = null;
-    listen<{ session_id: string; username: string; prompt: string }>(
-      "discord-prompt",
-      (event) => {
-        const { session_id, username } = event.payload;
-        const canvas = useCanvasStore.getState();
-        const hasMountedPanel = canvas.terminals.some(
-          (t) => t.panelType === "claude" && t.terminalId === session_id && !t.poppedOut,
-        );
-        if (hasMountedPanel) return;
-
-        const session = useProviderSessionStore.getState().sessions[session_id];
-        if (!session) {
-          console.warn("[discord] Prompt arrived for unknown session:", session_id);
-          return;
-        }
-
-        canvas.addClaudeTerminal(session.cwd || "", false, session.name || username, session_id);
-        window.setTimeout(() => {
-          emit("discord-prompt", event.payload).catch((err) => {
-            console.warn("[discord] Failed to replay prompt after opening panel:", err);
-          });
-        }, 250);
-      },
-    ).then((fn) => { unlisten = fn; }).catch((err) => console.warn("[discord] listener failed:", err));
-    return () => { if (unlisten) unlisten(); };
-  }, []);
-
-  // Reactively rename Discord channels when a provider-backed session's name/cwd changes.
-  useEffect(() => {
-    const unsub = useProviderSessionStore.subscribe((state, prev) => {
-      for (const [sid, sess] of Object.entries(state.sessions)) {
-        const before = prev.sessions[sid];
-        if (!before) {
-          syncNamedSessionToDiscord(sid, sess);
-          continue;
-        }
-        const nameChanged = before.name !== sess.name;
-        const cwdChanged = before.cwd !== sess.cwd;
-        if (nameChanged || cwdChanged) syncNamedSessionToDiscord(sid, sess);
-      }
-    });
-    return unsub;
-  }, []);
-
-  // If a provider panel is opened for an already-named session, make sure the
-  // bot sees it even when the session metadata itself did not change.
-  useEffect(() => {
-    const unsub = useCanvasStore.subscribe((state, prev) => {
-      const previousIds = new Set(
-        prev.terminals.filter((t) => t.panelType === "claude").map((t) => t.terminalId)
-      );
-      for (const t of state.terminals) {
-        if (t.panelType !== "claude" || previousIds.has(t.terminalId)) continue;
-        syncNamedSessionToDiscord(t.terminalId, useProviderSessionStore.getState().sessions[t.terminalId]);
-      }
-    });
-    return unsub;
-  }, []);
-
-  // Cleanup closed terminals (only if not popped out)
-  useEffect(() => {
-    const unsub = useCanvasStore.subscribe((state, prev) => {
-      const currentIds = new Set(state.terminals.map((t) => t.terminalId));
-      for (const t of prev.terminals) {
-        if (!currentIds.has(t.terminalId) && !t.poppedOut) {
-          if (t.panelType === "claude") {
-            const sess = useProviderSessionStore.getState().sessions[t.terminalId];
-            closeProviderSession(t.terminalId, resolveSessionProviderState(sess).provider).catch(() => {});
-            unlinkSessionFromDiscord(t.terminalId).catch(() => {});
-            // Only remove unnamed/disposable sessions — named ones (e.g. widget chats)
-            // stay in memory so they can be reopened with messages intact
-            if (!sess?.name) {
-              useProviderSessionStore.getState().removeSession(t.terminalId);
-            }
-            // Cancel delegation task if this was a child session
-            const delStore = useDelegationStore.getState();
-            const group = delStore.getGroupForSession(t.terminalId);
-            if (group) {
-              const task = group.tasks.find((tk) => tk.sessionId === t.terminalId);
-              if (task && task.status === "running") {
-                delStore.updateTaskStatus(group.id, task.id, "cancelled");
-              }
-            }
-          } else {
-            closeTerminal(t.terminalId).catch(() => {});
-          }
-        }
-      }
-    });
-    return unsub;
-  }, []);
-
-  // Listen for popped-out terminals coming back
-  useEffect(() => {
-    let unlistenFn: (() => void) | undefined;
-    listen<{ terminalId: string; borderColor?: string }>(
-      "terminal-pop-back",
-      (event) => {
-        const store = useCanvasStore.getState();
-        store.popIn(event.payload.terminalId);
-        if (event.payload.borderColor) {
-          const term = store.terminals.find((t) => t.terminalId === event.payload.terminalId);
-          if (term) store.setBorderColor(term.id, event.payload.borderColor);
-        }
-      }
-    ).then((fn) => { unlistenFn = fn; });
-    return () => { unlistenFn?.(); };
-  }, []);
-
-  const handleMinimize = () => appWindow.minimize();
-  const handleMaximize = async () => {
-    await appWindow.toggleMaximize();
-    setIsMaximized(await appWindow.isMaximized());
+  const minimize = () => {
+    if (isTauriRuntime) getCurrentWindow().minimize().catch(() => {});
   };
-  const handleClose = () => appWindow.close();
+  const maximize = async () => {
+    if (!isTauriRuntime) return;
+    const appWindow = getCurrentWindow();
+    await appWindow.toggleMaximize().catch(() => {});
+    setIsMaximized(await appWindow.isMaximized().catch(() => false));
+  };
+  const close = () => {
+    if (isTauriRuntime) getCurrentWindow().close().catch(() => {});
+  };
 
   return (
-    <div className="app">
-      {/* Header */}
-      <div className="header">
-        <div className="header-brand" data-tauri-drag-region>
-          <span className="brand-text">&gt;64_</span>
+    <main className="app-shell">
+      <header className="titlebar">
+        <div className="brand" data-tauri-drag-region>
+          <span className="brand-mark" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+            <i />
+          </span>
+          <span className="brand-name">Widget 64</span>
+          <span className="brand-edition">spatial runtime</span>
         </div>
 
-        <button
-          className="header-action"
-          onClick={() => useCanvasStore.getState().addTerminal()}
-          title="New Terminal"
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12">
-            <path d="M6 1V11M1 6H11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+        <nav className="view-switcher" aria-label="Workspace view">
+          {viewOptions.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className={view === option.id ? "view-switcher__button is-active" : "view-switcher__button"}
+              onClick={() => setView(option.id)}
+              aria-pressed={view === option.id}
+              title={`${option.label} (${option.shortcut})`}
+            >
+              <ViewIcon view={option.id} />
+              <span>{option.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        <div className="titlebar-drag" data-tauri-drag-region />
+
+        <button className="new-widget-button" type="button" onClick={() => setManagerOpen(true)}>
+          <svg viewBox="0 0 16 16" aria-hidden="true">
+            <path d="M8 3v10M3 8h10" />
           </svg>
-          <span>Terminal</span>
+          <span>New widget</span>
+          <kbd>N</kbd>
         </button>
 
-        <button
-          className="header-action header-action--claude"
-          onClick={() => setProviderSessionDialogOpen(true)}
-          title="New Code Session"
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M2 9L5 3L8 7L10 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-          </svg>
-          <span>Code</span>
-        </button>
-
-        <button
-          className="header-action header-action--widget"
-          onClick={() => setWidgetDialogOpen(true)}
-          title="Widgets"
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <rect x="1" y="1" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.1"/>
-            <rect x="7" y="1" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.1"/>
-            <rect x="1" y="7" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.1"/>
-            <rect x="7" y="7" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.1"/>
-          </svg>
-          <span>Widget</span>
-        </button>
-
-        <button
-          className="header-action header-action--skill"
-          onClick={() => setSkillDialogOpen(true)}
-          title="Skills"
-        >
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
-            <path d="M6 1L10 3.5V8.5L6 11L2 8.5V3.5L6 1Z" stroke="currentColor" strokeWidth="1.1" strokeLinejoin="round"/>
-            <path d="M6 5.5V8M6 4V4.5" stroke="currentColor" strokeWidth="1.1" strokeLinecap="round"/>
-          </svg>
-          <span>Skills</span>
-        </button>
-
-        <div className="header-drag" data-tauri-drag-region />
-
-        {updateState.kind !== "idle" && (
-          <button
-            className={`header-update header-update--${updateState.kind}`}
-            onClick={handleUpdateClick}
-            disabled={updateState.kind === "checking" || updateState.kind === "downloading" || updateState.kind === "installing" || updateState.kind === "restarting"}
-            title={updateButtonTitle(updateState)}
-          >
-            {updateButtonText(updateState)}
+        <div className="window-controls" aria-label="Window controls">
+          <button type="button" onClick={minimize} aria-label="Minimize window">
+            <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5h8" /></svg>
           </button>
-        )}
-
-        <button
-          className="header-btn"
-          onClick={() => setPaletteOpen(true)}
-          title="Quick Pastes (Ctrl+Shift+P)"
-        >
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
-            <path d="M2 3H12M2 7H9M2 11H11" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-          </svg>
-        </button>
-        <button
-          className="header-btn"
-          onClick={() => setSettingsOpen(true)}
-          title="Settings"
-        >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M6.5 1L7 3L6 3.5L4.5 2L3 3.5L4 5L3.5 6L1.5 5.5V7.5L3.5 8L4 9L3 10.5L4.5 12L6 11L7 11.5L6.5 13.5H8.5L9 11.5L10 11L11.5 12L13 10.5L12 9L12.5 8L14.5 7.5V5.5L12.5 6L12 5L13 3.5L11.5 2L10 3L9 2.5L8.5 1H6.5Z" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
-            <circle cx="7.5" cy="7.5" r="2" stroke="currentColor" strokeWidth="1"/>
-          </svg>
-        </button>
-
-        <div className="window-controls">
-          <button className="window-btn window-btn--minimize" onClick={handleMinimize} title="Minimize">
-            <svg width="10" height="1" viewBox="0 0 10 1"><rect width="10" height="1" fill="currentColor" /></svg>
-          </button>
-          <button className="window-btn window-btn--maximize" onClick={handleMaximize} title={isMaximized ? "Restore" : "Maximize"}>
-            {isMaximized ? (
-              <svg width="10" height="10" viewBox="0 0 10 10"><path d="M2 3V9H8V3H2ZM3 0H10V7H9V1H3V0Z" fill="currentColor" /></svg>
-            ) : (
-              <svg width="10" height="10" viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" stroke="currentColor" fill="none" strokeWidth="1" /></svg>
-            )}
-          </button>
-          <button className="window-btn window-btn--close" onClick={handleClose} title="Close">
-            <svg width="10" height="10" viewBox="0 0 10 10"><path d="M1 1L9 9M9 1L1 9" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>
-          </button>
-        </div>
-      </div>
-
-      {/* Widget zip drop overlay */}
-      {widgetDropOver && (
-        <div className="wdg-drop-overlay">
-          <div className="wdg-drop-content">
-            <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-              <rect x="3" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-              <rect x="14" y="3" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-              <rect x="3" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
-              <rect x="14" y="14" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth="1.5"/>
+          <button type="button" onClick={maximize} aria-label={isMaximized ? "Restore window" : "Maximize window"}>
+            <svg viewBox="0 0 12 12" aria-hidden="true">
+              {isMaximized ? <path d="M4 2.5h5.5V8M2.5 4H8v5.5H2.5z" /> : <rect x="2.5" y="2.5" width="7" height="7" rx=".5" />}
             </svg>
-            <span>Drop to install widget</span>
-          </div>
+          </button>
+          <button className="window-close" type="button" onClick={close} aria-label="Close window">
+            <svg viewBox="0 0 12 12" aria-hidden="true"><path d="m3 3 6 6M9 3 3 9" /></svg>
+          </button>
         </div>
-      )}
+      </header>
 
-      {/* Canvas */}
-      <Canvas />
-
-      {/* Overlays */}
-      <CommandPalette isOpen={paletteOpen} onClose={() => setPaletteOpen(false)} />
-      <SettingsPanel isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
-      <ProviderSessionDialog
-        isOpen={providerSessionDialogOpen}
-        onClose={() => setProviderSessionDialogOpen(false)}
-        onConfirm={(cwd, _skip, sessionName, provider) => {
-          useCanvasStore.getState().addClaudeTerminal(cwd, false, sessionName);
-          {
-            const terminals = useCanvasStore.getState().terminals;
-            const newest = terminals[terminals.length - 1];
-            if (newest?.panelType === "claude") {
-              const sid = newest.terminalId;
-              // The dialog provider choice is explicit, so persist and lock it
-              // before the panel mounts.
-              // The chat shell's createSession effect is idempotent, so this
-              // primes name/cwd before the panel mounts.
-              useProviderSessionStore.getState().createSession(sid, sessionName, false, undefined, cwd, provider, true);
-              if (sessionName) {
-                // Auto-link to Discord (silently fails if bot not running)
-                linkSessionToDiscord(sid, sessionName, cwd).catch(() => {});
-              }
-            }
-          }
-        }}
-        onReopen={(sessionId, dialogCwd, provider) => {
-          // Pull the cached name + cwd metadata out of localStorage so we can
-          // spawn the panel with the right label + working dir. Messages no
-          // longer live here; the provider session store hydrates them from
-          // the provider history backend.
-          let name: string | undefined;
-          let savedCwd = "";
-          try {
-            const saved = readProviderSessionMetadata(sessionId);
-            name = saved?.name;
-            savedCwd = saved?.cwd || "";
-          } catch (e) {
-            console.warn("[session] Failed to read session metadata from localStorage:", e);
-          }
-          const effectiveCwd = savedCwd || dialogCwd || ".";
-          useCanvasStore.getState().addClaudeTerminal(effectiveCwd, false, name || undefined, sessionId);
-          useProviderSessionStore.getState().createSession(sessionId, name, false, undefined, effectiveCwd, provider, true);
-          if (provider === "openai") {
-            useProviderSessionStore.getState().setCodexThreadId(sessionId, sessionId);
-          }
-          if (name) linkSessionToDiscord(sessionId, name, effectiveCwd).catch(() => {});
-        }}
-      />
-      <WidgetDialog
-        isOpen={widgetDialogOpen}
-        onClose={() => setWidgetDialogOpen(false)}
-      />
-      <SkillDialog
-        isOpen={skillDialogOpen}
-        onClose={() => setSkillDialogOpen(false)}
-      />
-
-      {/* Sonner toast notifications */}
-      <Toaster
-        position="top-right"
-        theme="dark"
-        richColors
-        closeButton
-        expand={false}
-        toastOptions={{
-          style: {
-            background: "var(--bg-secondary, #181825)",
-            border: "1px solid var(--ft-border, #cba6f7)",
-            color: "var(--fg, #cdd6f4)",
-            fontFamily: "'Cascadia Code', Consolas, monospace",
-            fontSize: "12px",
-          },
-        }}
-      />
-    </div>
+      <WidgetWorkspace view={view} onViewChange={setView} onOpenManager={() => setManagerOpen(true)} />
+      <WidgetManager open={managerOpen} onClose={() => setManagerOpen(false)} />
+      <Toaster position="bottom-right" theme="dark" richColors closeButton />
+    </main>
   );
 }
 

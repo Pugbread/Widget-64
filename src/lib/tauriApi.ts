@@ -776,6 +776,14 @@ export async function createWidgetFolder(widgetId: string): Promise<string> {
   return invoke("create_widget_folder", { widgetId });
 }
 
+export async function scaffoldWidgetProject(widgetId: string, displayName: string): Promise<string> {
+  return invoke("scaffold_widget_project", { widgetId, displayName });
+}
+
+export async function openWidgetFolder(path: string): Promise<void> {
+  return invoke("open_widget_folder", { path });
+}
+
 export async function writeWidgetInstructionFiles(widgetId: string): Promise<string[]> {
   return invoke("write_widget_instruction_files", { widgetId });
 }

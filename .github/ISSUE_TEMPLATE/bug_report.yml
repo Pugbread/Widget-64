@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a reproducible problem in Terminal 64.
+description: Report a reproducible problem in Widget 64.
 title: "[Bug]: "
 labels: ["bug", "triage"]
 body:
@@ -10,7 +10,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: Terminal 64 version
+      label: Widget 64 version
       description: The app version (see About / package.json) or commit SHA if running from source.
       placeholder: "e.g. 0.3.1 or commit 2aa1dbf"
     validations:
@@ -41,7 +41,7 @@ body:
       label: Steps to reproduce
       description: Minimal, ordered steps. Include any commands, keybindings, or UI actions.
       placeholder: |
-        1. Open Terminal 64
+        1. Open Widget 64
         2. Click …
         3. Type …
     validations:

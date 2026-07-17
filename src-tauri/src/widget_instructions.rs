@@ -4,23 +4,40 @@ use std::path::{Path, PathBuf};
 
 const WIDGET_INSTRUCTION_FILENAMES: [&str; 2] = ["CLAUDE.md", "AGENTS.md"];
 
-const WIDGET_BUILDING_INSTRUCTIONS: &str = r#"You are building a widget for Terminal 64, a canvas-based terminal emulator.
+const WIDGET_BUILDING_INSTRUCTIONS: &str = r#"You are building a widget for Widget 64, a spatial desktop runtime for standalone Tauri widgets.
 
-A "widget" is a web panel that lives inside Terminal 64. Your job is to create files in this folder (starting with `index.html`) that Terminal 64 will hot-load into an iframe via a local HTTP server.
+A widget has two equal targets: it runs inside Widget 64 from `index.html`, and it runs as its own Tauri 2 desktop app from the `src-tauri/` project in this folder. Build one responsive frontend for both targets. Widget 64 hot-loads the source files through its local HTTP server; Vite builds those same files for Tauri.
 
 **Rules:**
-- The entry point is always `index.html` - Terminal 64 loads it automatically
+- The entry point is always `index.html` - Widget 64 loads it automatically
 - You can use MULTIPLE files: separate CSS, JS, images, JSON, sub-pages - anything served over HTTP works. Use relative paths (e.g. `<script src="app.js">`, `<link href="style.css">`)
 - The iframe is sandboxed with `allow-scripts allow-same-origin allow-popups allow-forms allow-modals` and has camera/microphone/geolocation/clipboard permissions
 - You CAN use external CDN imports, embed external iframes, and fetch from APIs
-- Terminal 64 auto-reloads the iframe whenever ANY file in the widget folder changes
+- Widget 64 auto-reloads the iframe whenever ANY file in the widget folder changes
 - Make it visually polished - use good typography, spacing, and color
 - The widget should be responsive and look good at any size (the user can resize the panel)
 - For simple widgets, a single `index.html` with inline CSS/JS is fine. For complex widgets, split into multiple files
+- Preserve the generated Tauri project and keep `npm run tauri dev` and `npm run tauri build` working
+- Detect embedded mode with `window.parent !== window`. Host-only bridge calls need a sensible standalone fallback or a clear unavailable state
+- Do not depend on a fixed aspect ratio. Test portrait, square, and wide layouts
 
-## Terminal 64 Widget API (postMessage bridge)
+## Run targets
 
-Widgets communicate with Terminal 64 via `window.parent.postMessage(msg, "*")` and listen for responses via `window.addEventListener("message", handler)`. All async operations return results via response events. Include an `id` field in your payload to correlate requests with responses.
+```bash
+# Browser/Vite development
+npm install
+npm run dev
+
+# Standalone native window
+npm run tauri dev
+
+# Production desktop build
+npm run tauri build
+```
+
+## Widget 64 host API (postMessage bridge)
+
+Widgets communicate with Widget 64 via `window.parent.postMessage(msg, "*")` and listen for responses via `window.addEventListener("message", handler)`. All async operations return results via response events. Include an `id` field in your payload to correlate requests with responses. The generated `src/bridge.js` already wraps this contract and includes standalone fallbacks; extend it rather than duplicating request plumbing.
 
 ```js
 // Reusable helper - use this for all async bridge calls
@@ -305,7 +322,8 @@ mod tests {
         let agents = fs::read_to_string(dir.join("AGENTS.md"))?;
 
         assert_eq!(paths.len(), 2);
-        assert!(claude.contains("Terminal 64 Widget API"));
+        assert!(claude.contains("Widget 64 host API"));
+        assert!(claude.contains("two equal targets"));
         assert!(claude.contains("Theme is reactive"));
         assert_eq!(claude, agents);
 
