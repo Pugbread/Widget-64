@@ -211,31 +211,11 @@ jobs:
     needs: [resolve-tag, build]
     runs-on: ubuntu-latest
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-assets
-          merge-multiple: true
-
-      - name: List release assets
-        run: ls -la release-assets || true
-
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.resolve-tag.outputs.tag }}
           name: "Widget 64 ${{ needs.resolve-tag.outputs.tag }}"
-          draft: true
+          draft: false
           prerelease: false
           generate_release_notes: true
-          fail_on_unmatched_files: true
-          files: |
-            release-assets/*.dmg
-            release-assets/*.deb
-            release-assets/*.AppImage
-            release-assets/*.rpm
-            release-assets/*.exe
-            release-assets/*.msi
-            release-assets/*.tar.gz
-            release-assets/*.sig
-            release-assets/latest.json
